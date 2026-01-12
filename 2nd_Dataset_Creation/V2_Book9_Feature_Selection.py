@@ -6,17 +6,22 @@
 # MAGIC
 # MAGIC | Phase | Method | Features | Purpose |
 # MAGIC |-------|--------|----------|---------|
-# MAGIC | **Phase 1** | Cluster-Based Reduction | 171 → ~70-80 | Remove redundant/correlated features |
-# MAGIC | **Phase 2** | Iterative SHAP Winnowing | ~70-80 → Final | Fine-tune with 20-25 removals per iteration |
+# MAGIC | **Phase 1** | Cluster-Based Reduction | All → ~50% | Remove redundant/correlated features |
+# MAGIC | **Phase 2** | Iterative SHAP Winnowing | ~50% → Final | Fine-tune with up to 25 removals per iteration |
+# MAGIC | **Phase 3** | CV Stability Analysis | Final → Stable | Validate selection across N_CV_FOLDS folds |
 # MAGIC
 # MAGIC ## Key Features
 # MAGIC - **Dynamic clustering threshold** via silhouette score (not fixed 0.7)
 # MAGIC - **2:1 SHAP weighting** for positive cases (model handles imbalance via scale_pos_weight)
+# MAGIC - **Clinical must-keep features** - preserve interpretable CRC signals regardless of ranking
+# MAGIC - **3-fold CV stability analysis** - identify features robust across different train/val splits
+# MAGIC - **Test set holdout** - test metrics evaluated only once at final model (no peeking)
 # MAGIC - **Granular checkpoints** - stop anytime and resume without starting over
 # MAGIC - **Automatic validation gates** - stops when performance degrades
 # MAGIC
 # MAGIC ## Checkpoint System
-# MAGIC Checkpoints saved after each step. Kill notebook anytime, re-run to resume.
+# MAGIC Checkpoints saved after each step using portable formats (JSON for models, Parquet for DataFrames).
+# MAGIC Kill notebook anytime, re-run to resume. Backward compatible with legacy pickle checkpoints.
 
 # COMMAND ----------
 
@@ -155,6 +160,16 @@ print("="*70)
 
 # MAGIC %md
 # MAGIC ## Checkpoint Management Functions
+# MAGIC
+# MAGIC Checkpoints use portable, version-stable formats:
+# MAGIC - **XGBoost models**: JSON format via `model.save_model()` (portable across XGBoost versions)
+# MAGIC - **DataFrames**: Parquet format (efficient, schema-preserving)
+# MAGIC - **NumPy arrays**: `.npy` format
+# MAGIC - **Simple types**: JSON format
+# MAGIC - **Complex objects**: Pickle fallback (scipy linkage matrices, etc.)
+# MAGIC
+# MAGIC Each checkpoint is stored as a directory with typed files + metadata.
+# MAGIC Legacy pickle checkpoints (`.pkl` files) are still supported for backward compatibility.
 
 # COMMAND ----------
 
@@ -910,6 +925,10 @@ print(f"✓ Saved: {OUTPUT_DIR}/threshold_analysis.png")
 
 # MAGIC %md
 # MAGIC ## Step 1.4: Train Baseline Model (All Features)
+# MAGIC
+# MAGIC Train XGBoost model with all features to establish baseline performance.
+# MAGIC Evaluation is performed on **train and validation sets only** - test set is held out
+# MAGIC until final model evaluation to prevent information leakage during feature selection.
 
 # COMMAND ----------
 
@@ -1249,6 +1268,14 @@ print(f"\n✓ Phase 1 complete: {len(phase1_features)} features")
 # MAGIC ---
 # MAGIC # PHASE 2: Iterative SHAP Winnowing
 # MAGIC ---
+# MAGIC
+# MAGIC Iteratively remove low-importance features while monitoring validation performance.
+# MAGIC
+# MAGIC **Key controls:**
+# MAGIC - **Validation gates**: Stop if val AUPRC drops >5% or train-val gap increases >0.02
+# MAGIC - **Clinical must-keep**: Never remove clinically important features (weight loss, GI bleeding, etc.)
+# MAGIC - **Protected features**: Never remove features in top 50% by SHAP ratio
+# MAGIC - **Test holdout**: All decisions based on validation metrics only; test evaluated at final model
 
 # COMMAND ----------
 
@@ -1509,6 +1536,10 @@ while stop_reason is None:
 # MAGIC ---
 # MAGIC # Final Results
 # MAGIC ---
+# MAGIC
+# MAGIC Train final model with selected features and evaluate performance.
+# MAGIC **This is the first and only time the test set is evaluated** - all feature selection
+# MAGIC decisions were made using validation metrics only.
 
 # COMMAND ----------
 
@@ -1565,6 +1596,14 @@ print(f"\n{'Test AUPRC (held out)':<20} {final_metrics['test']['auprc']:>12.4f}"
 
 # MAGIC %md
 # MAGIC ## Save Final Outputs
+# MAGIC
+# MAGIC Outputs saved to `feature_selection_outputs/`:
+# MAGIC - `final_features.txt` - Feature names, one per line
+# MAGIC - `final_features.py` - Python list for easy import
+# MAGIC - `final_model.pkl` - Trained XGBoost model
+# MAGIC - `feature_selection_summary.json` - Summary metrics and feature list
+# MAGIC - `iteration_tracking.csv` - Metrics at each iteration
+# MAGIC - `cv_stability_report.json` - Cross-validation stability analysis (added after CV section runs)
 
 # COMMAND ----------
 
