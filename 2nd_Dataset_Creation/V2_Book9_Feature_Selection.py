@@ -141,6 +141,16 @@ import shap
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
+# Verify Parquet support (required for checkpoint system)
+try:
+    import pyarrow
+    print(f"PyArrow version: {pyarrow.__version__}")
+except ImportError:
+    raise ImportError(
+        "PyArrow is required for Parquet checkpoint support. "
+        "Install with: pip install pyarrow"
+    )
+
 # Initialize Spark
 spark = SparkSession.builder.getOrCreate()
 spark.conf.set("spark.sql.session.timeZone", "America/Chicago")
@@ -619,6 +629,8 @@ else:
     train_mask = df_pandas['SPLIT'] == 'train'
     n_neg = (df_pandas.loc[train_mask, 'FUTURE_CRC_EVENT'] == 0).sum()
     n_pos = (df_pandas.loc[train_mask, 'FUTURE_CRC_EVENT'] == 1).sum()
+    if n_pos == 0:
+        raise ValueError("No positive cases in training data. Cannot compute scale_pos_weight.")
     scale_pos_weight = n_neg / n_pos
 
     print(f"\nData loaded:")
@@ -689,18 +701,21 @@ else:
     y = patient_labels['label'].values
     groups = patient_labels['PAT_ID'].values
 
-    # Store fold assignments for each patient
+    # Store fold assignments for each patient (as lists for JSON serialization)
+    # Use string keys because JSON converts int keys to strings
     cv_fold_assignments = {}
     for fold_idx, (train_idx, val_idx) in enumerate(sgkf.split(X_dummy, y, groups)):
-        train_patients = set(patient_labels.iloc[train_idx]['PAT_ID'].values)
-        val_patients = set(patient_labels.iloc[val_idx]['PAT_ID'].values)
+        train_patients_list = patient_labels.iloc[train_idx]['PAT_ID'].tolist()
+        val_patients_list = patient_labels.iloc[val_idx]['PAT_ID'].tolist()
 
-        cv_fold_assignments[fold_idx] = {
-            'train_patients': train_patients,
-            'val_patients': val_patients
+        cv_fold_assignments[str(fold_idx)] = {
+            'train_patients': train_patients_list,  # Stored as list for JSON compatibility
+            'val_patients': val_patients_list
         }
 
-        # Calculate stats
+        # Calculate stats (convert to set for efficient lookup)
+        train_patients = set(train_patients_list)
+        val_patients = set(val_patients_list)
         train_obs = trainval_df[trainval_df['PAT_ID'].isin(train_patients)]
         val_obs = trainval_df[trainval_df['PAT_ID'].isin(val_patients)]
 
@@ -1784,9 +1799,10 @@ for fold_idx in range(1, N_CV_FOLDS):
     print(f"FOLD {fold_idx + 1} / {N_CV_FOLDS}")
     print(f"{'='*50}")
 
-    # Get train/val split for this fold
-    fold_train_patients = cv_fold_assignments[fold_idx]['train_patients']
-    fold_val_patients = cv_fold_assignments[fold_idx]['val_patients']
+    # Get train/val split for this fold (convert lists to sets for efficient lookup)
+    # Use string key because JSON converts int keys to strings
+    fold_train_patients = set(cv_fold_assignments[str(fold_idx)]['train_patients'])
+    fold_val_patients = set(cv_fold_assignments[str(fold_idx)]['val_patients'])
 
     # Create masks
     trainval_mask = df_pandas['SPLIT'].isin(['train', 'val'])
@@ -1802,7 +1818,10 @@ for fold_idx in range(1, N_CV_FOLDS):
     print(f"  Val: {len(y_fold_val):,} obs, {y_fold_val.sum():,} events")
 
     # Calculate scale_pos_weight for this fold
-    fold_scale_pos_weight = (y_fold_train == 0).sum() / (y_fold_train == 1).sum()
+    n_pos_fold = (y_fold_train == 1).sum()
+    if n_pos_fold == 0:
+        raise ValueError(f"No positive cases in fold {fold_idx} training data. Check SGKF stratification.")
+    fold_scale_pos_weight = (y_fold_train == 0).sum() / n_pos_fold
 
     # Train baseline model on this fold (using clustering features from main pipeline)
     print("\n  Training model on cluster representatives...")
