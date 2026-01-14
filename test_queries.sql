@@ -29,11 +29,15 @@ SELECT
     SIZE(denial_embedding) as embedding_dims
 FROM dev.fin_ds.fudgesicle_inference;
 
--- 3. Did notes come through? (not just "No Note Available")
+-- 3. Explicit NULL check - which columns have nulls?
 SELECT
     hsp_account_id,
-    CASE WHEN discharge_summary_text = 'No Note Available' THEN 'MISSING' ELSE 'OK' END as discharge,
-    CASE WHEN hp_note_text = 'No Note Available' THEN 'MISSING' ELSE 'OK' END as hp
+    CASE WHEN denial_letter_text IS NULL THEN 'NULL' ELSE 'OK' END as denial_text,
+    CASE WHEN denial_letter_filename IS NULL THEN 'NULL' ELSE 'OK' END as denial_filename,
+    CASE WHEN denial_embedding IS NULL THEN 'NULL' ELSE 'OK' END as embedding,
+    CASE WHEN payor IS NULL THEN 'NULL' ELSE 'OK' END as payor,
+    CASE WHEN discharge_summary_text IS NULL OR discharge_summary_text = 'No Note Available' THEN 'MISSING' ELSE 'OK' END as discharge,
+    CASE WHEN hp_note_text IS NULL OR hp_note_text = 'No Note Available' THEN 'MISSING' ELSE 'OK' END as hp
 FROM dev.fin_ds.fudgesicle_inference;
 
 -- 4. Preview note content
