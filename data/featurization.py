@@ -422,7 +422,7 @@ if RUN_GOLD_INGESTION:
         ])
 
         gold_df = spark.createDataFrame(gold_records, schema)
-        gold_df.write.format("delta").mode("append").saveAsTable(GOLD_LETTERS_TABLE)
+        gold_df.write.format("delta").mode("overwrite").option("mergeSchema", "true").saveAsTable(GOLD_LETTERS_TABLE)
         print(f"Wrote {len(gold_records)} records to {GOLD_LETTERS_TABLE}")
 
     count = spark.sql(f"SELECT COUNT(*) as cnt FROM {GOLD_LETTERS_TABLE}").collect()[0]["cnt"]
