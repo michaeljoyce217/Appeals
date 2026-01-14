@@ -581,87 +581,73 @@ if RUN_DENIAL_FEATURIZATION and len(TARGET_ACCOUNTS) > 0:
     account_list = ",".join(f"'{a}'" for a in account_ids)
 
     # Query clinical data from Clarity
+    # Based on original working query structure with ip_note_type filtering
     print("\nQuerying clinical data...")
     clinical_query = f"""
     WITH target_accounts AS (
         SELECT explode(array({account_list})) AS hsp_account_id
     ),
-    encounters AS (
-        SELECT pe.pat_enc_csn_id, pe.pat_id, pe.hsp_account_id,
-               pe.hosp_admsn_time, pe.hosp_disch_time,
-               ROW_NUMBER() OVER (PARTITION BY pe.hsp_account_id ORDER BY pe.hosp_admsn_time DESC) AS rn
-        FROM prod.clarity_cur.pat_enc_hsp_har_enh pe
-        INNER JOIN target_accounts ta ON pe.hsp_account_id = ta.hsp_account_id
-        WHERE pe.hosp_admsn_time IS NOT NULL
+
+    -- Get notes using ip_note_type (original working approach)
+    notes AS (
+        SELECT * FROM (
+            SELECT peh.pat_id
+                  ,peh.hsp_account_id
+                  ,nte.ip_note_type
+                  ,nte.note_id
+                  ,nte.note_csn_id
+                  ,nte.contact_date AS note_contact_date
+                  ,nte.ent_inst_local_dttm AS entry_datetime
+                  ,CONCAT_WS('\\n', SORT_ARRAY(COLLECT_LIST(STRUCT(nte.line, nte.note_text))).note_text) AS note_text
+            FROM clarity_cur.pat_enc_hsp_har_enh peh
+            INNER JOIN target_accounts ta ON peh.hsp_account_id = ta.hsp_account_id
+            INNER JOIN clarity_cur.hno_note_text_enh nte USING(pat_enc_csn_id)
+            WHERE nte.ip_note_type IN ('Discharge Summary', 'H&P')
+            GROUP BY peh.pat_id, peh.hsp_account_id, nte.ip_note_type, nte.note_id, nte.note_csn_id, nte.contact_date, nte.ent_inst_local_dttm
+        )
+        QUALIFY ROW_NUMBER() OVER (PARTITION BY hsp_account_id, ip_note_type ORDER BY note_contact_date DESC, entry_datetime DESC) = 1
     ),
-    latest_encounters AS (SELECT * FROM encounters WHERE rn = 1),
-    discharge_notes AS (
-        SELECT e.hsp_account_id,
-               hno.note_id AS discharge_note_id,
-               hno.pat_enc_csn_id AS discharge_note_csn_id,
-               CONCAT_WS(' ', COLLECT_LIST(hnt.note_text)) AS discharge_summary_text
-        FROM prod.clarity_cur.hno_info_enh hno
-        INNER JOIN latest_encounters e ON hno.pat_enc_csn_id = e.pat_enc_csn_id
-        INNER JOIN prod.clarity_cur.hno_note_text_enh hnt ON hno.note_id = hnt.note_id
-        WHERE hno.note_type_c = 2
-        GROUP BY e.hsp_account_id, hno.note_id, hno.pat_enc_csn_id
+
+    hp_note AS (
+        SELECT hsp_account_id, pat_id,
+               note_csn_id AS hp_note_csn_id,
+               note_id AS hp_note_id,
+               note_text AS hp_note_text
+        FROM notes WHERE ip_note_type = 'H&P'
     ),
-    hp_notes AS (
-        SELECT e.hsp_account_id,
-               hno.note_id AS hp_note_id,
-               hno.pat_enc_csn_id AS hp_note_csn_id,
-               CONCAT_WS(' ', COLLECT_LIST(hnt.note_text)) AS hp_note_text
-        FROM prod.clarity_cur.hno_info_enh hno
-        INNER JOIN latest_encounters e ON hno.pat_enc_csn_id = e.pat_enc_csn_id
-        INNER JOIN prod.clarity_cur.hno_note_text_enh hnt ON hno.note_id = hnt.note_id
-        WHERE hno.note_type_c = 1
-        GROUP BY e.hsp_account_id, hno.note_id, hno.pat_enc_csn_id
+
+    discharge AS (
+        SELECT hsp_account_id, pat_id,
+               note_csn_id AS discharge_note_csn_id,
+               note_id AS discharge_summary_note_id,
+               note_text AS discharge_summary_text
+        FROM notes WHERE ip_note_type = 'Discharge Summary'
     ),
+
     patient_info AS (
-        SELECT e.hsp_account_id, p.pat_id, p.pat_mrn_id,
-               CONCAT(p.pat_last_name, ', ', p.pat_first_name) AS formatted_name,
-               DATE_FORMAT(p.birth_date, 'MM/dd/yyyy') AS formatted_birthdate
-        FROM prod.clarity_cur.patient_enh p
-        INNER JOIN latest_encounters e ON p.pat_id = e.pat_id
-    ),
-    account_info AS (
-        SELECT ha.hsp_account_id,
-               'Mercy Hospital' AS facility_name,  -- Hardcoded; zc_loc_facility table not available
-               DATEDIFF(ha.disch_date_time, ha.adm_date_time) AS number_of_midnights,
-               CONCAT(DATE_FORMAT(ha.adm_date_time, 'MM/dd/yyyy'), ' - ',
-                      DATE_FORMAT(ha.disch_date_time, 'MM/dd/yyyy')) AS formatted_date_of_service
-        FROM prod.clarity_cur.hsp_account_enh ha
+        SELECT ha.hsp_account_id, patient.pat_id, patient.pat_mrn_id,
+               CONCAT(patient.pat_first_name, ' ', patient.pat_last_name) AS formatted_name,
+               DATE_FORMAT(patient.birth_date, 'MM/dd/yyyy') AS formatted_birthdate,
+               'Mercy Hospital' AS facility_name,
+               DATEDIFF(ha.disch_date_time, DATE(ha.adm_date_time)) AS number_of_midnights,
+               CONCAT(DATE_FORMAT(ha.adm_date_time, 'MM/dd/yyyy'), '-', DATE_FORMAT(ha.disch_date_time, 'MM/dd/yyyy')) AS formatted_date_of_service
+        FROM clarity_cur.hsp_account_enh ha
         INNER JOIN target_accounts ta ON ha.hsp_account_id = ta.hsp_account_id
-    ),
-    -- claim_info CTE removed: prod.clarity.hsp_claim_detail not available
-    -- claim_number, tax_id, npi will be NULL
-    diagnosis AS (
-        SELECT hadl.hsp_account_id,
-               FIRST(edg.code) AS code,
-               FIRST(edg.dx_name) AS dx_name
-        FROM prod.clarity_cur.hsp_acct_dx_list_enh hadl
-        INNER JOIN target_accounts ta ON hadl.hsp_account_id = ta.hsp_account_id
-        INNER JOIN prod.clarity_cur.edg_current_icd10_enh edg ON hadl.dx_id = edg.dx_id
-        WHERE hadl.line = 1
-        GROUP BY hadl.hsp_account_id
+        INNER JOIN clarity_cur.patient_enh patient ON ha.pat_id = patient.pat_id
     )
-    SELECT ta.hsp_account_id, pi.pat_id, pi.pat_mrn_id,
+
+    SELECT pi.hsp_account_id, pi.pat_id, pi.pat_mrn_id,
            pi.formatted_name, pi.formatted_birthdate,
-           ai.facility_name, ai.number_of_midnights, ai.formatted_date_of_service,
-           NULL AS claim_number, NULL AS tax_id, NULL AS npi,  -- hsp_claim_detail not available
-           d.code, d.dx_name,
-           CAST(dn.discharge_note_id AS STRING) AS discharge_summary_note_id,
-           CAST(dn.discharge_note_csn_id AS STRING) AS discharge_note_csn_id,
-           dn.discharge_summary_text,
-           CAST(hp.hp_note_id AS STRING) AS hp_note_id,
-           CAST(hp.hp_note_csn_id AS STRING) AS hp_note_csn_id,
-           hp.hp_note_text
-    FROM target_accounts ta
-    LEFT JOIN patient_info pi ON ta.hsp_account_id = pi.hsp_account_id
-    LEFT JOIN account_info ai ON ta.hsp_account_id = ai.hsp_account_id
-    LEFT JOIN diagnosis d ON ta.hsp_account_id = d.hsp_account_id
-    LEFT JOIN discharge_notes dn ON ta.hsp_account_id = dn.hsp_account_id
-    LEFT JOIN hp_notes hp ON ta.hsp_account_id = hp.hsp_account_id
+           pi.facility_name, pi.number_of_midnights, pi.formatted_date_of_service,
+           COALESCE(d.discharge_summary_note_id, 'no id available') AS discharge_summary_note_id,
+           COALESCE(d.discharge_note_csn_id, 'no id available') AS discharge_note_csn_id,
+           COALESCE(d.discharge_summary_text, 'No Note Available') AS discharge_summary_text,
+           COALESCE(h.hp_note_id, 'no id available') AS hp_note_id,
+           COALESCE(h.hp_note_csn_id, 'no id available') AS hp_note_csn_id,
+           COALESCE(h.hp_note_text, 'No Note Available') AS hp_note_text
+    FROM patient_info pi
+    LEFT JOIN discharge d ON pi.hsp_account_id = d.hsp_account_id
+    LEFT JOIN hp_note h ON pi.hsp_account_id = h.hsp_account_id
     """
 
     clinical_df = spark.sql(clinical_query).toPandas()
