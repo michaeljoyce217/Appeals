@@ -423,7 +423,13 @@ else:
 
         try:
             denial_info = json.loads(json_str)
-        except json.JSONDecodeError as e:
+            # Handle case where LLM returns array instead of object
+            if isinstance(denial_info, list):
+                if len(denial_info) > 0:
+                    denial_info = denial_info[0]
+                else:
+                    raise ValueError("Empty array returned")
+        except (json.JSONDecodeError, ValueError) as e:
             result["status"] = "parse_error"
             result["error"] = f"JSON parse failed: {e}"
             results.append(result)
