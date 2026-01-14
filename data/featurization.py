@@ -50,8 +50,8 @@ GOLD_LETTERS_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_gold_letters"
 INFERENCE_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_inference"
 
 # Paths
-GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@Mercy.net/fudgescicle/utils/gold_standard_rebuttals"
-DENIAL_LETTERS_PATH = "/Workspace/Repos/mijo8881@Mercy.net/fudgescicle/utils/Sample_Denial_Letters"
+GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_rebuttals"
+DENIAL_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/Sample_Denial_Letters"
 
 print(f"Catalog: {trgt_cat}")
 

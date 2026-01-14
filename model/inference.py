@@ -666,7 +666,7 @@ if n_new_rows > 0 and 'results' in dir() and len(results) > 0:
 # This lets users review and provide feedback on quality.
 # In production, we'd skip this and just write to the Delta table.
 EXPORT_TO_DOCX = True
-DOCX_OUTPUT_PATH = "/Workspace/Repos/mijo8881@Mercy.net/fudgescicle/output"
+DOCX_OUTPUT_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/output"
 
 if EXPORT_TO_DOCX and 'output_rows' in dir() and len(output_rows) > 0:
     print(f"\n{'='*60}")
