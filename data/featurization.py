@@ -456,6 +456,33 @@ Return ONLY valid JSON:
 }}'''
 
 
+def transform_hsp_account_id(raw_id):
+    """
+    Transform HSP_ACCOUNT_ID from denial letter format to Clarity format.
+    Denial letters often have: H1234567890
+    Clarity needs: 12345678 (remove H prefix, remove last 2 digits)
+    """
+    if not raw_id:
+        return None
+
+    # Remove any whitespace
+    cleaned = str(raw_id).strip()
+
+    # Remove H prefix if present
+    if cleaned.upper().startswith('H'):
+        cleaned = cleaned[1:]
+
+    # Remove last 2 digits to match Clarity
+    if len(cleaned) > 2:
+        cleaned = cleaned[:-2]
+
+    # Return only if we have digits left
+    if cleaned and cleaned.isdigit():
+        return cleaned
+
+    return None
+
+
 def extract_denial_info_llm(text):
     """
     Use LLM to extract HSP_ACCOUNT_ID and payor from denial letter.
@@ -480,7 +507,16 @@ def extract_denial_info_llm(text):
             raw = raw.split("```")[1].split("```")[0].strip()
 
         result = json.loads(raw)
-        return result.get("hsp_account_id"), result.get("payor", "Unknown")
+        raw_account_id = result.get("hsp_account_id")
+        payor = result.get("payor", "Unknown")
+
+        # Transform account ID to match Clarity format
+        transformed_id = transform_hsp_account_id(raw_account_id)
+
+        if raw_account_id and transformed_id:
+            print(f"    Account ID: {raw_account_id} → {transformed_id} (transformed)")
+
+        return transformed_id, payor
 
     except Exception as e:
         print(f"    LLM extraction error: {e}")
