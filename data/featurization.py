@@ -118,24 +118,27 @@ def identify_denial_start(pages_text):
     """
     PARSER: Identify which page the denial letter starts on.
 
-    KEY: Look for insurance company name in LETTERHEAD POSITION (first 5 lines),
-    not just anywhere on the page. The rebuttal mentions insurance companies
-    in the body text, but only the denial has them in letterhead position.
+    Detection strategy:
+    1. Skip page 1 (that's always the rebuttal)
+    2. Look for: insurer name + address pattern + date in first 10-15 lines
+    3. The denial is typically near the MIDDLE of the PDF (attached after rebuttal)
 
     Returns (denial_start_page, payor_name) - 1-indexed page number.
     """
-    # Insurance company names to look for in LETTERHEAD (first few lines only)
+    import re
+
+    # Insurance company names
     payor_patterns = [
         ("unitedhealth", "UnitedHealthcare"),
         ("united health", "UnitedHealthcare"),
         ("uhc", "UnitedHealthcare"),
-        ("optum", "UnitedHealthcare"),  # UHC subsidiary
+        ("optum", "UnitedHealthcare"),
         ("aetna", "Aetna"),
         ("cigna", "Cigna"),
-        ("evernorth", "Cigna"),  # Cigna subsidiary
+        ("evernorth", "Cigna"),
         ("humana", "Humana"),
         ("anthem", "Anthem"),
-        ("elevance", "Anthem"),  # Anthem's parent company
+        ("elevance", "Anthem"),
         ("blue cross", "Blue Cross Blue Shield"),
         ("blue shield", "Blue Cross Blue Shield"),
         ("bcbs", "Blue Cross Blue Shield"),
@@ -146,40 +149,78 @@ def identify_denial_start(pages_text):
         ("ambetter", "Centene"),
         ("wellcare", "Centene"),
         ("healthnet", "Health Net"),
+        ("medicaid", "Medicaid"),
+        ("medicare", "Medicare"),
     ]
 
+    # Patterns for address and date (signs of a formal business letter header)
+    # Address: look for state abbreviations + zip codes
+    address_pattern = re.compile(
+        r'\b(AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY)\s*\d{5}',
+        re.IGNORECASE
+    )
+    # Date: MM/DD/YYYY or Month DD, YYYY
+    date_pattern = re.compile(
+        r'(\d{1,2}/\d{1,2}/\d{4})|((January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})',
+        re.IGNORECASE
+    )
+
+    # Skip page 1 - that's the rebuttal. Start from page 2.
     for i, page_text in enumerate(pages_text):
-        # Only check FIRST 5 LINES for letterhead (not entire page)
-        first_lines = page_text.split("\n")[:5]
-        header_text = "\n".join(first_lines).lower()
+        if i == 0:
+            continue  # Skip first page (rebuttal starts there)
 
-        # Check if insurance company name appears in letterhead position
+        # Check first 15 lines (letterhead + address block area)
+        first_lines = page_text.split("\n")[:15]
+        header_text = "\n".join(first_lines)
+        header_lower = header_text.lower()
+
+        # Look for insurer name in header
+        found_payor = None
         for pattern, payor_name in payor_patterns:
-            if pattern in header_text:
-                print(f"    Found '{pattern}' in letterhead on page {i+1}")
-                return i + 1, payor_name  # 1-indexed
+            if pattern in header_lower:
+                found_payor = payor_name
+                break
 
-    # Fallback: look for typical denial letter phrases in first 10 lines
-    # (but NOT "denial" alone - too common in rebuttals)
-    denial_start_phrases = [
+        if found_payor:
+            # Verify it looks like a letter header (has address OR date)
+            has_address = bool(address_pattern.search(header_text))
+            has_date = bool(date_pattern.search(header_text))
+
+            if has_address or has_date:
+                print(f"    Found denial: '{found_payor}' + {'address' if has_address else 'date'} on page {i+1}")
+                return i + 1, found_payor  # 1-indexed
+            else:
+                # Found payor name but no address/date - might still be it
+                print(f"    Found '{found_payor}' on page {i+1} (no address/date pattern)")
+                return i + 1, found_payor
+
+    # Fallback: look for typical denial letter subject lines
+    denial_subject_phrases = [
         "claim review determination",
         "medical necessity review",
-        "utilization review determination",
+        "utilization review",
         "peer review determination",
-        "appeal determination",
-        "reconsideration decision",
+        "clinical review",
+        "prior authorization",
+        "re: claim",
+        "re: member",
+        "re: patient",
     ]
 
     for i, page_text in enumerate(pages_text):
-        first_lines = page_text.split("\n")[:10]
-        header_text = "\n".join(first_lines).lower()
+        if i == 0:
+            continue  # Skip first page
 
-        for phrase in denial_start_phrases:
-            if phrase in header_text:
-                print(f"    Found '{phrase}' on page {i+1}")
+        first_lines = page_text.split("\n")[:15]
+        header_lower = "\n".join(first_lines).lower()
+
+        for phrase in denial_subject_phrases:
+            if phrase in header_lower:
+                print(f"    Found denial phrase '{phrase}' on page {i+1}")
                 return i + 1, "Unknown"
 
-    # Default: assume denial starts after last page (no denial found)
+    # Default: no denial found - all pages are rebuttal
     print("    WARNING: Could not identify denial start page")
     return len(pages_text) + 1, "Unknown"
 
