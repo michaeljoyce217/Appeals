@@ -87,8 +87,8 @@ print(f"Gold letters path: {GOLD_LETTERS_PATH}")
 # To list available secrets: dbutils.secrets.list(scope='idp_etl')
 AZURE_OPENAI_KEY = dbutils.secrets.get(scope='idp_etl', key='az-openai-key1')
 AZURE_OPENAI_ENDPOINT = dbutils.secrets.get(scope='idp_etl', key='az-openai-base')
-AZURE_DOC_INTEL_KEY = dbutils.secrets.get(scope='idp_etl', key='az-doc-intelligence-key')  # UPDATE IF DIFFERENT
-AZURE_DOC_INTEL_ENDPOINT = dbutils.secrets.get(scope='idp_etl', key='az-doc-intelligence-endpoint')  # UPDATE IF DIFFERENT
+AZURE_DOC_INTEL_KEY = dbutils.secrets.get(scope='idp_etl', key='az-aidcmntintel-key1')
+AZURE_DOC_INTEL_ENDPOINT = dbutils.secrets.get(scope='idp_etl', key='az-aidcmntintel-endpoint')
 
 print("Credentials loaded")
 
