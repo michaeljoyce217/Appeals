@@ -438,93 +438,134 @@ else:
 # #############################################################################
 
 # =============================================================================
-# CELL 9: Auto-Extract HSP_ACCOUNT_ID from Denial Letters
+# CELL 9: Parse Denial Letters (LLM extracts HSP_ACCOUNT_ID + Payor)
 # =============================================================================
-def extract_hsp_account_id(text):
+DENIAL_PARSER_PROMPT = '''Extract the hospital account ID and insurance payor from this denial letter.
+
+# Denial Letter Text (first pages)
+{denial_text}
+
+# Instructions
+Find the HOSPITAL ACCOUNT ID (may be labeled as Account #, Hospital Account, HSP Account, Acct, etc.)
+Find the INSURANCE PAYOR (the insurance company that sent this denial)
+
+Return ONLY valid JSON:
+{{
+    "hsp_account_id": "the account number or null if not found",
+    "payor": "insurance company name or Unknown"
+}}'''
+
+
+def extract_denial_info_llm(text):
     """
-    Extract HSP_ACCOUNT_ID from denial letter text using regex patterns.
-    Returns the account ID if found, None otherwise.
+    Use LLM to extract HSP_ACCOUNT_ID and payor from denial letter.
+    More flexible than regex - handles various formats.
     """
-    import re
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[
+                {"role": "system", "content": "Extract information accurately. Return only valid JSON."},
+                {"role": "user", "content": DENIAL_PARSER_PROMPT.format(denial_text=text[:15000])}
+            ],
+            temperature=0,
+            max_tokens=200
+        )
 
-    # Patterns to look for (order by specificity)
-    patterns = [
-        # Hospital Account patterns
-        r'(?:hospital\s*account|hsp\s*account|account)\s*#?\s*:?\s*(\d{8,10})',
-        r'(?:hosp\.?\s*acct|acct)\s*#?\s*:?\s*(\d{8,10})',
-        # Account Number patterns
-        r'account\s*(?:number|no\.?|#)\s*:?\s*(\d{8,10})',
-        # Claim/Reference patterns (sometimes used interchangeably)
-        r'(?:claim|reference)\s*(?:number|no\.?|#)\s*:?\s*(\d{8,10})',
-        # Generic pattern - 8-10 digit number after "account"
-        r'account[:\s]+(\d{8,10})',
-    ]
+        raw = response.choices[0].message.content.strip()
+        # Handle markdown code blocks
+        if "```json" in raw:
+            raw = raw.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw:
+            raw = raw.split("```")[1].split("```")[0].strip()
 
-    text_lower = text.lower()
+        result = json.loads(raw)
+        return result.get("hsp_account_id"), result.get("payor", "Unknown")
 
-    for pattern in patterns:
-        match = re.search(pattern, text_lower)
-        if match:
-            return match.group(1)
-
-    return None
+    except Exception as e:
+        print(f"    LLM extraction error: {e}")
+        return None, "Unknown"
 
 
-def auto_discover_denial_letters():
+def process_sample_denial_letters():
     """
-    Scan Sample_Denial_Letters folder, extract HSP_ACCOUNT_ID from each PDF.
-    Returns list of (hsp_account_id, filename) tuples for successful extractions.
+    Process all denial letters in Sample_Denial_Letters folder:
+    1. Extract text using Document Intelligence
+    2. Use LLM to extract HSP_ACCOUNT_ID and payor
+    3. Generate embedding
+    Returns list of dicts with all extracted info.
     """
-    discovered = []
-    skipped = []
+    results = []
 
     if not os.path.exists(DENIAL_LETTERS_PATH):
         print(f"WARNING: Denial letters path not found: {DENIAL_LETTERS_PATH}")
-        return discovered
+        return results
 
     pdf_files = [f for f in os.listdir(DENIAL_LETTERS_PATH) if f.lower().endswith('.pdf')]
     print(f"Found {len(pdf_files)} PDF files in Sample_Denial_Letters")
 
-    for pdf_file in pdf_files:
+    for i, pdf_file in enumerate(pdf_files):
+        print(f"\n[{i+1}/{len(pdf_files)}] Processing {pdf_file}")
         file_path = os.path.join(DENIAL_LETTERS_PATH, pdf_file)
+
         try:
-            # Extract text from first few pages (account ID is usually near the top)
+            # Step 1: Extract text
             pages = extract_text_from_pdf(file_path)
-            # Check first 3 pages for account ID
-            search_text = "\n".join(pages[:3]) if len(pages) >= 3 else "\n".join(pages)
+            full_text = "\n\n".join(pages)
+            print(f"  Extracted {len(pages)} pages, {len(full_text)} chars")
 
-            hsp_account_id = extract_hsp_account_id(search_text)
+            # Step 2: LLM extracts account ID and payor
+            search_text = "\n".join(pages[:3]) if len(pages) >= 3 else full_text
+            hsp_account_id, payor = extract_denial_info_llm(search_text)
+            print(f"  Account ID: {hsp_account_id or 'NOT FOUND'}")
+            print(f"  Payor: {payor}")
 
-            if hsp_account_id:
-                discovered.append((hsp_account_id, pdf_file))
-                print(f"  {pdf_file} → Account ID: {hsp_account_id}")
-            else:
-                skipped.append(pdf_file)
-                print(f"  {pdf_file} → No account ID found (skipped)")
+            # Step 3: Generate embedding
+            embedding = generate_embedding(full_text)
+            print(f"  Embedding: {len(embedding)} dims")
+
+            results.append({
+                "filename": pdf_file,
+                "hsp_account_id": hsp_account_id,
+                "payor": payor,
+                "denial_text": full_text,
+                "denial_embedding": embedding,
+                "page_count": len(pages),
+            })
 
         except Exception as e:
-            skipped.append(pdf_file)
-            print(f"  {pdf_file} → Error: {e} (skipped)")
+            print(f"  ERROR: {e}")
+            continue
 
-    print(f"\nDiscovered {len(discovered)}/{len(pdf_files)} account IDs")
-    return discovered
+    # Summary
+    found = sum(1 for r in results if r["hsp_account_id"])
+    print(f"\n{'='*60}")
+    print(f"SUMMARY: {found}/{len(pdf_files)} letters have HSP_ACCOUNT_ID")
+    print(f"{'='*60}")
+
+    return results
 
 
-# Auto-discover or use manual configuration
-RUN_AUTO_DISCOVERY = True
+# Process denial letters
+RUN_DENIAL_PROCESSING = False
 
-if RUN_AUTO_DISCOVERY:
+if RUN_DENIAL_PROCESSING:
     print("\n" + "="*60)
-    print("AUTO-DISCOVERING HSP_ACCOUNT_IDs FROM DENIAL LETTERS")
+    print("PROCESSING SAMPLE DENIAL LETTERS")
     print("="*60)
-    TARGET_ACCOUNTS = auto_discover_denial_letters()
+    DENIAL_RESULTS = process_sample_denial_letters()
 else:
-    # Manual configuration fallback
-    TARGET_ACCOUNTS = [
-        # ("HSP_ACCOUNT_ID", "denial_letter.pdf"),
-    ]
+    DENIAL_RESULTS = []
+    print("\nDenial processing skipped (set RUN_DENIAL_PROCESSING = True)")
 
-print(f"\nTarget accounts: {len(TARGET_ACCOUNTS)}")
+# Build TARGET_ACCOUNTS from results (only those with account IDs)
+TARGET_ACCOUNTS = [
+    (r["hsp_account_id"], r["filename"])
+    for r in DENIAL_RESULTS
+    if r["hsp_account_id"]
+]
+
+print(f"\nTarget accounts for Clarity join: {len(TARGET_ACCOUNTS)}")
 
 # =============================================================================
 # CELL 10: Process New Denials
@@ -633,39 +674,18 @@ if RUN_DENIAL_FEATURIZATION and len(TARGET_ACCOUNTS) > 0:
     clinical_df = spark.sql(clinical_query).toPandas()
     print(f"Retrieved {len(clinical_df)} accounts from Clarity")
 
-    # Parse denial letters with Parser Agent (same as gold letters)
-    print("\nParsing denial letters (Parser Agent)...")
-    parsed_denials = {}
+    # Use pre-parsed denial data from DENIAL_RESULTS (already has text, embedding, payor)
+    print("\nJoining with pre-parsed denial data...")
+    denial_lookup = {r["hsp_account_id"]: r for r in DENIAL_RESULTS if r["hsp_account_id"]}
 
-    for hsp_account_id, filename in TARGET_ACCOUNTS:
-        file_path = os.path.join(DENIAL_LETTERS_PATH, filename)
-        print(f"  Parsing {filename}...")
-
-        try:
-            parsed = parse_denial_pdf(file_path)
-            parsed["filename"] = filename
-            parsed_denials[hsp_account_id] = parsed
-            print(f"    Text: {len(parsed['denial_text'])} chars")
-            print(f"    Embedding: {len(parsed['denial_embedding'])} dims")
-            print(f"    Payor: {parsed['payor']}")
-        except Exception as e:
-            print(f"    ERROR: {e}")
-            parsed_denials[hsp_account_id] = {
-                "denial_text": None,
-                "denial_embedding": None,
-                "payor": "Unknown",
-                "filename": filename
-            }
-
-    # Add parsed denial data to clinical data
     clinical_df['denial_letter_text'] = clinical_df['hsp_account_id'].map(
-        lambda x: parsed_denials.get(x, {}).get('denial_text'))
+        lambda x: denial_lookup.get(x, {}).get('denial_text'))
     clinical_df['denial_letter_filename'] = clinical_df['hsp_account_id'].map(
-        lambda x: parsed_denials.get(x, {}).get('filename'))
+        lambda x: denial_lookup.get(x, {}).get('filename'))
     clinical_df['denial_embedding'] = clinical_df['hsp_account_id'].map(
-        lambda x: parsed_denials.get(x, {}).get('denial_embedding'))
+        lambda x: denial_lookup.get(x, {}).get('denial_embedding'))
     clinical_df['payor'] = clinical_df['hsp_account_id'].map(
-        lambda x: parsed_denials.get(x, {}).get('payor'))
+        lambda x: denial_lookup.get(x, {}).get('payor'))
     clinical_df['scope_filter'] = SCOPE_FILTER
     clinical_df['featurization_timestamp'] = datetime.now().isoformat()
 
@@ -677,7 +697,7 @@ if RUN_DENIAL_FEATURIZATION and len(TARGET_ACCOUNTS) > 0:
     if WRITE_TO_TABLE:
         spark_df = spark.createDataFrame(clinical_df)
         spark_df = spark_df.withColumn("insert_tsp", current_timestamp())
-        spark_df.write.mode("append").saveAsTable(INFERENCE_TABLE)
+        spark_df.write.format("delta").mode("overwrite").option("mergeSchema", "true").saveAsTable(INFERENCE_TABLE)
         print(f"Wrote {len(clinical_df)} rows to {INFERENCE_TABLE}")
     else:
         print("To write, set WRITE_TO_TABLE = True")
