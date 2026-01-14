@@ -625,13 +625,13 @@ if RUN_DENIAL_FEATURIZATION and len(TARGET_ACCOUNTS) > 0:
         INNER JOIN latest_encounters e ON p.pat_id = e.pat_id
     ),
     account_info AS (
-        SELECT ha.hsp_account_id, f.facility_name,
+        SELECT ha.hsp_account_id,
+               'Mercy Hospital' AS facility_name,  -- Hardcoded; zc_loc_facility table not available
                DATEDIFF(ha.disch_date_time, ha.adm_date_time) AS number_of_midnights,
                CONCAT(DATE_FORMAT(ha.adm_date_time, 'MM/dd/yyyy'), ' - ',
                       DATE_FORMAT(ha.disch_date_time, 'MM/dd/yyyy')) AS formatted_date_of_service
         FROM prod.clarity_cur.hsp_account_enh ha
         INNER JOIN target_accounts ta ON ha.hsp_account_id = ta.hsp_account_id
-        LEFT JOIN prod.clarity.zc_loc_facility f ON ha.loc_id = f.facility_id
     ),
     claim_info AS (
         SELECT hcd.hsp_account_id,
