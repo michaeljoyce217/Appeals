@@ -16,10 +16,9 @@
 # =============================================================================
 # These packages are not pre-installed on Databricks ML runtime:
 # - azure-ai-documentintelligence: PDF text extraction via Azure AI
-# - azure-core: Required for Azure credential handling
 # - openai: Azure OpenAI API client
 #
-# %pip install azure-ai-documentintelligence azure-core openai
+# %pip install azure-ai-documentintelligence==1.0.2 openai
 # dbutils.library.restartPython()
 
 # =============================================================================
@@ -84,19 +83,17 @@ print(f"Gold letters path: {GOLD_LETTERS_PATH}")
 # All secrets are stored in Databricks secret scope 'idp_etl'.
 # These credentials are managed by the platform team.
 #
-# az-openai-key1: API key for Azure OpenAI service
-# az-openai-base: Base endpoint URL for Azure OpenAI
-# az-doc-intelligence-key: API key for Azure Document Intelligence (PDF reading)
-# az-doc-intelligence-endpoint: Endpoint for Document Intelligence service
+# UPDATE THESE KEY NAMES if different in your environment:
+# To list available secrets: dbutils.secrets.list(scope='idp_etl')
 AZURE_OPENAI_KEY = dbutils.secrets.get(scope='idp_etl', key='az-openai-key1')
 AZURE_OPENAI_ENDPOINT = dbutils.secrets.get(scope='idp_etl', key='az-openai-base')
-AZURE_DOC_INTEL_KEY = dbutils.secrets.get(scope='idp_etl', key='az-doc-intelligence-key')
-AZURE_DOC_INTEL_ENDPOINT = dbutils.secrets.get(scope='idp_etl', key='az-doc-intelligence-endpoint')
+AZURE_DOC_INTEL_KEY = dbutils.secrets.get(scope='idp_etl', key='az-doc-intelligence-key')  # UPDATE IF DIFFERENT
+AZURE_DOC_INTEL_ENDPOINT = dbutils.secrets.get(scope='idp_etl', key='az-doc-intelligence-endpoint')  # UPDATE IF DIFFERENT
 
 print("Credentials loaded")
 
 # =============================================================================
-# CELL 5: Initialize Azure Clients
+# CELL 5: Initialize Clients and Document Reading Functions
 # =============================================================================
 from openai import AzureOpenAI
 from azure.ai.documentintelligence import DocumentIntelligenceClient
@@ -120,7 +117,40 @@ doc_intel_client = DocumentIntelligenceClient(
     credential=AzureKeyCredential(AZURE_DOC_INTEL_KEY)
 )
 
-print("Azure clients initialized")
+def read_pdf(file_path):
+    """Read text from a PDF file using Azure Document Intelligence"""
+    try:
+        with open(file_path, 'rb') as f:
+            document_bytes = f.read()
+
+        # Submit document for analysis
+        poller = doc_intel_client.begin_analyze_document(
+            model_id="prebuilt-read",
+            body=AnalyzeDocumentRequest(bytes_source=document_bytes),
+        )
+        result = poller.result()
+
+        # Extract text line by line, preserving document order
+        text_parts = []
+        for page in result.pages:
+            for line in page.lines:
+                text_parts.append(line.content)
+        return "\n".join(text_parts)
+    except Exception as e:
+        print(f"Error reading PDF {file_path}: {e}")
+        return f"Error reading PDF: {e}"
+
+def read_document(file_path):
+    """Read text from PDF or TXT based on extension"""
+    if file_path.lower().endswith('.pdf'):
+        return read_pdf(file_path)
+    elif file_path.lower().endswith('.txt'):
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
+    else:
+        return f"Unsupported file format: {file_path}"
+
+print("Azure OpenAI and Document Intelligence clients initialized")
 
 # =============================================================================
 # CELL 6: Create Gold Letters Table (run once)
@@ -210,7 +240,7 @@ print(f"Table {INFERENCE_TABLE} ready")
 # (the denial is tacked onto the end of the document).
 #
 # PROCESS:
-# 1. Read PDF with Document Intelligence
+# 1. Read PDF with PyPDF2
 # 2. Use LLM to split into rebuttal vs denial sections
 # 3. Generate embedding of the denial (for matching new denials later)
 # 4. Store everything in Delta table
@@ -290,27 +320,10 @@ if RUN_GOLD_INGESTION:
         file_path = os.path.join(GOLD_LETTERS_PATH, pdf_file)
 
         # ---------------------------------------------------------------------
-        # Step 1: Extract text from PDF using Document Intelligence
+        # Step 1: Extract text from PDF using PyPDF2
         # ---------------------------------------------------------------------
-        # The "prebuilt-read" model extracts text while preserving reading order.
-        # This works well for business letters with standard layouts.
         print("  Reading PDF...")
-        with open(file_path, "rb") as f:
-            document_bytes = f.read()
-
-        # Submit document for analysis (async operation)
-        poller = doc_intel_client.begin_analyze_document(
-            model_id="prebuilt-read",
-            body=AnalyzeDocumentRequest(bytes_source=document_bytes),
-        )
-        result = poller.result()
-
-        # Extract text line by line, preserving document order
-        text_parts = []
-        for page in result.pages:
-            for line in page.lines:
-                text_parts.append(line.content)
-        full_text = "\n".join(text_parts)
+        full_text = read_pdf(file_path)
         print(f"  Extracted {len(full_text)} characters")
 
         # ---------------------------------------------------------------------
@@ -622,36 +635,9 @@ if RUN_DENIAL_FEATURIZATION and len(TARGET_ACCOUNTS) > 0:
         file_path = os.path.join(DENIAL_LETTERS_PATH, filename)
         filename_map[hsp_account_id] = filename
 
-        try:
-            # Check file extension to determine how to read
-            _, ext = os.path.splitext(filename.lower())
-
-            if ext == ".txt":
-                # Plain text files can be read directly
-                with open(file_path, "r", encoding="utf-8") as f:
-                    denial_texts[hsp_account_id] = f.read()
-            else:
-                # PDFs require Document Intelligence for text extraction
-                with open(file_path, "rb") as f:
-                    document_bytes = f.read()
-
-                poller = doc_intel_client.begin_analyze_document(
-                    model_id="prebuilt-read",
-                    body=AnalyzeDocumentRequest(bytes_source=document_bytes),
-                )
-                result = poller.result()
-
-                # Extract text line by line
-                text_parts = []
-                for page in result.pages:
-                    for line in page.lines:
-                        text_parts.append(line.content)
-                denial_texts[hsp_account_id] = "\n".join(text_parts)
-
-            print(f"  {filename}: {len(denial_texts[hsp_account_id])} chars")
-        except Exception as e:
-            print(f"  ERROR reading {filename}: {e}")
-            denial_texts[hsp_account_id] = None
+        print(f"  Reading {filename}...")
+        denial_texts[hsp_account_id] = read_document(file_path)
+        print(f"    Extracted {len(denial_texts[hsp_account_id])} chars")
 
     # -------------------------------------------------------------------------
     # Add denial text and metadata to clinical data
