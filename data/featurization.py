@@ -29,10 +29,10 @@ import json
 import uuid
 from datetime import datetime
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import current_timestamp, lit
+from pyspark.sql.functions import current_timestamp, lit, col
 from pyspark.sql.types import (
     StructType, StructField, StringType, ArrayType, FloatType,
-    TimestampType, MapType, IntegerType
+    TimestampType, MapType, IntegerType, BooleanType
 )
 
 spark = SparkSession.builder.getOrCreate()
@@ -1234,46 +1234,77 @@ if RUN_DENIAL_FEATURIZATION and len(TARGET_ACCOUNTS) > 0:
     LEFT JOIN code_documentation cd ON pi.hsp_account_id = cd.hsp_account_id
     """
 
-    clinical_df = spark.sql(clinical_query).toPandas()
-    print(f"Retrieved {len(clinical_df)} accounts from Clarity")
+    # Execute clinical query in Spark (DO NOT collect to driver - memory issue)
+    clinical_spark_df = spark.sql(clinical_query)
+    clinical_count = clinical_spark_df.count()
+    print(f"Retrieved {clinical_count} accounts from Clarity")
 
     # Use pre-parsed denial data from DENIAL_RESULTS (already has text, embedding, payor)
-    print("\nJoining with pre-parsed denial data...")
+    # Convert denial results to Spark DataFrame for distributed join
+    print("\nJoining with pre-parsed denial data (in Spark, not Pandas)...")
 
-    # Cast hsp_account_id to string for matching (avoid type mismatch)
-    clinical_df['hsp_account_id'] = clinical_df['hsp_account_id'].astype(str)
-    denial_lookup = {str(r["hsp_account_id"]): r for r in DENIAL_RESULTS if r["hsp_account_id"]}
+    if DENIAL_RESULTS:
+        # Create denial DataFrame from parsed results
+        denial_records = [
+            {
+                "denial_hsp_account_id": str(r["hsp_account_id"]),
+                "denial_letter_text": r.get("denial_text"),
+                "denial_letter_filename": r.get("filename"),
+                "denial_embedding": r.get("denial_embedding"),
+                "payor": r.get("payor"),
+                "original_drg": r.get("original_drg"),
+                "proposed_drg": r.get("proposed_drg"),
+                "is_sepsis": r.get("is_sepsis", False),
+            }
+            for r in DENIAL_RESULTS
+            if r["hsp_account_id"]
+        ]
 
-    print(f"  Clinical IDs: {list(clinical_df['hsp_account_id'].head())}")
-    print(f"  Denial IDs: {list(denial_lookup.keys())[:5]}")
+        denial_schema = StructType([
+            StructField("denial_hsp_account_id", StringType(), True),
+            StructField("denial_letter_text", StringType(), True),
+            StructField("denial_letter_filename", StringType(), True),
+            StructField("denial_embedding", ArrayType(FloatType()), True),
+            StructField("payor", StringType(), True),
+            StructField("original_drg", StringType(), True),
+            StructField("proposed_drg", StringType(), True),
+            StructField("is_sepsis", BooleanType(), True),
+        ])
 
-    clinical_df['denial_letter_text'] = clinical_df['hsp_account_id'].map(
-        lambda x: denial_lookup.get(str(x), {}).get('denial_text'))
-    clinical_df['denial_letter_filename'] = clinical_df['hsp_account_id'].map(
-        lambda x: denial_lookup.get(str(x), {}).get('filename'))
-    clinical_df['denial_embedding'] = clinical_df['hsp_account_id'].map(
-        lambda x: denial_lookup.get(str(x), {}).get('denial_embedding'))
-    clinical_df['payor'] = clinical_df['hsp_account_id'].map(
-        lambda x: denial_lookup.get(str(x), {}).get('payor'))
-    clinical_df['original_drg'] = clinical_df['hsp_account_id'].map(
-        lambda x: denial_lookup.get(str(x), {}).get('original_drg'))
-    clinical_df['proposed_drg'] = clinical_df['hsp_account_id'].map(
-        lambda x: denial_lookup.get(str(x), {}).get('proposed_drg'))
-    clinical_df['is_sepsis'] = clinical_df['hsp_account_id'].map(
-        lambda x: denial_lookup.get(str(x), {}).get('is_sepsis', False))
-    clinical_df['scope_filter'] = SCOPE_FILTER
-    clinical_df['featurization_timestamp'] = datetime.now().isoformat()
+        denial_spark_df = spark.createDataFrame(denial_records, denial_schema)
+        print(f"  Denial records: {denial_spark_df.count()}")
 
-    print(f"\nFeaturized {len(clinical_df)} rows with embeddings")
+        # Cast clinical hsp_account_id to string for join
+        clinical_spark_df = clinical_spark_df.withColumn(
+            "hsp_account_id",
+            col("hsp_account_id").cast("string")
+        )
 
-    # Write to table
+        # Join clinical data with denial data in Spark (distributed)
+        joined_df = clinical_spark_df.join(
+            denial_spark_df,
+            clinical_spark_df["hsp_account_id"] == denial_spark_df["denial_hsp_account_id"],
+            "left"
+        ).drop("denial_hsp_account_id")
+
+        # Add metadata columns
+        joined_df = joined_df.withColumn("scope_filter", lit(SCOPE_FILTER))
+        joined_df = joined_df.withColumn("featurization_timestamp", lit(datetime.now().isoformat()))
+
+        final_count = joined_df.count()
+        print(f"\nFeaturized {final_count} rows with embeddings")
+    else:
+        print("  No denial results to join")
+        joined_df = clinical_spark_df.withColumn("scope_filter", lit(SCOPE_FILTER))
+        joined_df = joined_df.withColumn("featurization_timestamp", lit(datetime.now().isoformat()))
+
+    # Write to table (all in Spark - no driver memory issues)
     WRITE_TO_TABLE = False
 
     if WRITE_TO_TABLE:
-        spark_df = spark.createDataFrame(clinical_df)
-        spark_df = spark_df.withColumn("insert_tsp", current_timestamp())
-        spark_df.write.format("delta").mode("overwrite").saveAsTable(INFERENCE_TABLE)
-        print(f"Wrote {len(clinical_df)} rows to {INFERENCE_TABLE}")
+        joined_df = joined_df.withColumn("insert_tsp", current_timestamp())
+        joined_df.write.format("delta").mode("overwrite").saveAsTable(INFERENCE_TABLE)
+        print(f"Wrote to {INFERENCE_TABLE}")
     else:
         print("To write, set WRITE_TO_TABLE = True")
 
