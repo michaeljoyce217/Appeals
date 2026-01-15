@@ -16,7 +16,7 @@ When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this sy
 4. **Applying clinical criteria** - Includes official Propel sepsis definitions
 5. **Generating appeals** - Creates patient-specific appeal letters using clinical notes from Clarity
 
-> **Note:** In the POC, the LLM also extracts the HSP_ACCOUNT_ID from the denial letter text. In production, this will be replaced by Epic workqueue integration where the account ID is already known.
+> **Note:** In the POC, the LLM extracts the HSP_ACCOUNT_ID and determines sepsis relevance from the denial letter text alone. Some denial letters are generic and don't contain DRG codes or diagnosis information, so they cannot be classified. In production, Epic workqueue integration will provide this context directly, enabling 100% coverage.
 
 ## Architecture
 

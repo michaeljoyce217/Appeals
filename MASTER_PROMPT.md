@@ -117,6 +117,11 @@ Each inference run creates a new folder: `utils/outputs/output_YYYY-MM-DD_HHMMSS
 
 ---
 
+### POC Limitation
+In the POC, the LLM extracts account ID and sepsis relevance from denial letter text alone. Some generic denials lack DRG codes or diagnosis information and cannot be classified. In production, Epic workqueue integration will provide this context directly, enabling 100% coverage.
+
+---
+
 ## Quick Start (Databricks)
 
 1. **Install dependencies** (run Cell 1 alone, then restart):

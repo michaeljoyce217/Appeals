@@ -564,8 +564,9 @@
                         from Clarity (Progress Notes, Consults, H&P, Discharge Summary, ED Notes, and more).
                     </p>
                     <p style="font-size: 0.9rem; color: #666; margin-top: 0.5rem;">
-                        <em><strong>Note:</strong> In the POC, the LLM extracts the HSP_ACCOUNT_ID from the denial letter text.
-                        In production, this will be replaced by Epic workqueue integration where the account ID is already known.</em>
+                        <em><strong>Note:</strong> In the POC, the LLM extracts account ID and sepsis relevance from denial letter text alone.
+                        Some generic denials lack this information and cannot be classified. In production, Epic workqueue integration
+                        will provide this context directly, enabling 100% coverage.</em>
                     </p>
                 </div>
             </div>
