@@ -202,6 +202,31 @@ Run the notebook. For this denial:
 | Clinical Data | Epic Clarity |
 | Runtime | Databricks Runtime 15.4 LTS ML |
 
+## Cost Estimates
+
+Based on Azure OpenAI GPT-4.1 standard pricing ($2.20/1M input, $8.80/1M output):
+
+### Per Appeal Letter (~$0.20)
+
+| Step | Input Tokens | Output Tokens | Cost |
+|------|-------------|---------------|------|
+| Denial info extraction | ~4,000 | ~100 | $0.01 |
+| Note extraction (4 calls avg) | ~12,000 | ~3,200 | $0.05 |
+| Appeal letter generation | ~50,000 | ~3,000 | $0.14 |
+| **Total** | ~66,000 | ~6,300 | **~$0.20** |
+
+### Monthly Projections
+
+| Volume | LLM Cost |
+|--------|----------|
+| 100 appeals/month | ~$20 |
+| 500 appeals/month | ~$100 |
+| 1,000 appeals/month | ~$200 |
+
+**One-time setup (featurization.py):** <$1 for gold letter + Propel ingestion
+
+**Infrastructure:** $0 incremental (uses existing Databricks/Azure)
+
 ## Extending to Other Conditions
 
 The architecture supports any denial type. To add a new condition (e.g., pneumonia):

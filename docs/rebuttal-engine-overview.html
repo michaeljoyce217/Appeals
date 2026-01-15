@@ -924,11 +924,44 @@
                     <strong>Maximum (16 calls):</strong> Parser + Writer + 14 Extraction calls (when all notes exceed 8K chars)<br>
                     <strong>Typical:</strong> ~5-8 calls per case (parser, writer, 3-6 extractions)
                 </p>
-                <p style="margin-top: 1rem;">
-                    <strong>Cost per case:</strong> ~$0.10-0.25 depending on note lengths<br>
-                    <strong>Processing time:</strong> 30-90 seconds (parallelized extraction)
-                </p>
             </div>
+
+            <h3>Cost Breakdown (Azure OpenAI GPT-4.1)</h3>
+            <table class="comparison-table">
+                <tr>
+                    <th>Step</th>
+                    <th>Input Tokens</th>
+                    <th>Output Tokens</th>
+                    <th>Cost</th>
+                </tr>
+                <tr>
+                    <td>Denial info extraction</td>
+                    <td>~4,000</td>
+                    <td>~100</td>
+                    <td>$0.01</td>
+                </tr>
+                <tr>
+                    <td>Note extraction (4 calls avg)</td>
+                    <td>~12,000</td>
+                    <td>~3,200</td>
+                    <td>$0.05</td>
+                </tr>
+                <tr>
+                    <td>Appeal letter generation</td>
+                    <td>~50,000</td>
+                    <td>~3,000</td>
+                    <td>$0.14</td>
+                </tr>
+                <tr>
+                    <td><strong>Total per letter</strong></td>
+                    <td>~66,000</td>
+                    <td>~6,300</td>
+                    <td><strong>~$0.20</strong></td>
+                </tr>
+            </table>
+            <p style="font-size: 0.9rem; color: #666; margin-top: 0.5rem;">
+                <em>Based on Azure OpenAI GPT-4.1 standard pricing: $2.20/1M input, $8.80/1M output</em>
+            </p>
 
             <h3>Data Flow (Per Letter)</h3>
             <table class="comparison-table">
@@ -1063,7 +1096,15 @@
             <h3>Investment Profile</h3>
             <ul>
                 <li><strong>Infrastructure cost:</strong> $0 incremental (uses existing Databricks/Azure)</li>
-                <li><strong>LLM cost:</strong> ~$0.10-0.25 per letter (Azure OpenAI usage)</li>
+                <li><strong>LLM cost:</strong> ~$0.20 per letter (Azure OpenAI GPT-4.1)</li>
+                <li><strong>One-time setup:</strong> &lt;$1 (gold letter + Propel ingestion)</li>
+                <li><strong>Monthly cost examples:</strong>
+                    <ul>
+                        <li>100 appeals/month: ~$20</li>
+                        <li>500 appeals/month: ~$100</li>
+                        <li>1,000 appeals/month: ~$200</li>
+                    </ul>
+                </li>
                 <li><strong>Development:</strong> Internal Financial Data Science team</li>
                 <li><strong>Ongoing maintenance:</strong> Minimal - system improves as gold letter library grows</li>
             </ul>
