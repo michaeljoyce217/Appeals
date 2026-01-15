@@ -570,9 +570,9 @@
                 <div class="step-content">
                     <h4>Per-Letter Processing (inference.py)</h4>
                     <p>
-                        Processes one denial PDF end-to-end: parses the PDF, extracts account ID/payor/DRGs via LLM,
+                        Processes one denial PDF end-to-end: parses the PDF, performs vector search to find
+                        the best matching gold letter (uses denial text only), extracts account ID/payor/DRGs via LLM,
                         queries Clarity for this account's <strong>14 clinical note types</strong>,
-                        performs vector search to find the best matching gold letter,
                         <strong>extracts key clinical data with timestamps</strong> from long notes,
                         and generates a complete appeal letter. Outputs a DOCX file for CDI review.
                     </p>

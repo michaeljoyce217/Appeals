@@ -10,12 +10,13 @@ Automated generation of DRG appeal letters for sepsis-related insurance denials.
 
 When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this system generates professional appeal letters by:
 
-1. **Parsing denial letters** - OCR + LLM extracts payor, DRG codes, and determines if sepsis-related
-2. **Querying clinical data** - Pulls 14 note types from Epic Clarity for this specific account
-3. **Vector search** - Finds the most similar past denial from our gold standard library
-4. **Learning from winners** - Uses the matched winning appeal as a template/guide
-5. **Applying clinical criteria** - Includes official Propel sepsis definitions
-6. **Generating appeals** - Creates patient-specific appeal letters using clinical notes
+1. **Parsing denial letters** - OCR extracts text from denial PDF
+2. **Vector search** - Finds the most similar past denial from our gold standard library (uses denial text only)
+3. **Extracting denial info** - LLM extracts account ID, payor, DRG codes, and determines if sepsis-related
+4. **Querying clinical data** - Pulls 14 note types from Epic Clarity for this specific account
+5. **Learning from winners** - Uses the matched winning appeal as a template/guide
+6. **Applying clinical criteria** - Includes official Propel sepsis definitions
+7. **Generating appeals** - Creates patient-specific appeal letters using clinical notes
 
 **Single-Letter Processing:** Each denial is processed end-to-end in one run. This matches production workflow (Epic workqueue feeds one case at a time) and eliminates batch processing memory issues.
 
@@ -162,9 +163,9 @@ KNOWN_ACCOUNT_ID = None  # or "12345678"
 ```
 
 Run the notebook. For this denial:
-- Parses PDF and extracts denial info
+- Parses PDF and finds best matching gold letter via vector search
+- Extracts denial info (account ID, payor, DRGs) via LLM
 - Queries Clarity for clinical notes (14 note types)
-- Finds best matching gold letter via vector search
 - Includes Propel sepsis definition
 - Generates appeal using clinical notes
 - Exports DOCX to `outputs/` folder
