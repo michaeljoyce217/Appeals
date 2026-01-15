@@ -801,6 +801,21 @@ else:
                 print("\nStep 7: Exporting to DOCX...")
                 from docx import Document
                 from docx.shared import Pt
+                import re
+
+                def add_markdown_paragraph(doc, text):
+                    """Add a paragraph with markdown bold (**text**) converted to Word bold."""
+                    p = doc.add_paragraph()
+                    # Split on **...** pattern, keeping the delimiters
+                    parts = re.split(r'(\*\*.*?\*\*)', text)
+                    for part in parts:
+                        if part.startswith('**') and part.endswith('**'):
+                            # Bold text - strip the ** markers
+                            run = p.add_run(part[2:-2])
+                            run.bold = True
+                        else:
+                            p.add_run(part)
+                    return p
 
                 # Ensure output folder exists
                 os.makedirs(DOCX_OUTPUT_BASE, exist_ok=True)
@@ -824,10 +839,10 @@ else:
 
                 doc.add_paragraph("─" * 60)
 
-                # Letter content
+                # Letter content - parse markdown bold
                 for paragraph in letter_text.split('\n\n'):
                     if paragraph.strip():
-                        p = doc.add_paragraph(paragraph.strip())
+                        p = add_markdown_paragraph(doc, paragraph.strip())
                         p.paragraph_format.space_after = Pt(12)
 
                 # Save
