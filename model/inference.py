@@ -151,15 +151,18 @@ DENIAL_PARSER_PROMPT = '''Extract key information from this denial letter.
 Find:
 1. HOSPITAL ACCOUNT ID - starts with "H" followed by digits (e.g., H1234567890)
 2. INSURANCE PAYOR - the company that sent this denial
-3. ORIGINAL DRG - the DRG code the hospital billed (e.g., 871)
-4. PROPOSED DRG - the DRG the payor wants to change it to (e.g., 872)
+3. ORIGINAL DRG - the DRG code the hospital billed (e.g., 871). ONLY if explicitly stated as a number.
+4. PROPOSED DRG - the DRG the payor wants to change it to (e.g., 872). ONLY if explicitly stated as a number.
 5. IS SEPSIS RELATED - does this denial involve sepsis, severe sepsis, or septic shock?
+
+CRITICAL: For DRG codes, return NONE unless you see an actual 3-digit DRG number explicitly written in the letter.
+Do NOT guess or infer DRG codes. If the letter just says "adjusted" or "changed" without specific numbers, return NONE.
 
 Return ONLY these lines (no JSON):
 ACCOUNT_ID: [H-prefixed number or NONE]
 PAYOR: [insurance company name]
-ORIGINAL_DRG: [3-digit code or NONE]
-PROPOSED_DRG: [3-digit code or NONE]
+ORIGINAL_DRG: [3-digit code ONLY if explicitly stated, otherwise NONE]
+PROPOSED_DRG: [3-digit code ONLY if explicitly stated, otherwise NONE]
 IS_SEPSIS: [YES or NO]'''
 
 
