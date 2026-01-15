@@ -1,12 +1,12 @@
 # compare_denials.py
-# Compare Sample_Denial_Letters with denial portions from gold_standard_rebuttals
+# Compare Sample_Denial_Letters with denial portions from gold_standard_appeals
 # Run in Databricks to check if they contain the same content
 
 # =============================================================================
 # CELL 1: Setup (copy paths from featurization.py)
 # =============================================================================
-GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_rebuttals"
-DENIAL_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/Sample_Denial_Letters"
+GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals"
+DENIAL_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/sample_denial_letters"
 
 # =============================================================================
 # CELL 2: Import and setup Document Intelligence

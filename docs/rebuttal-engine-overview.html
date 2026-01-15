@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sepsis Rebuttal Engine - Executive Overview</title>
+    <title>Sepsis Appeal Engine - Executive Overview</title>
     <style>
         :root {
             --mercy-blue: #003366;
@@ -402,7 +402,7 @@
 </head>
 <body>
     <header>
-        <h1>Sepsis Rebuttal Engine</h1>
+        <h1>Sepsis Appeal Engine</h1>
         <p>Multi-Agent AI for DRG Appeal Letter Automation</p>
         <span class="subtitle">Executive Overview | Financial Data Science</span>
     </header>
@@ -412,6 +412,7 @@
         <button class="tab" data-tab="problem">The Problem</button>
         <button class="tab" data-tab="solution">Our Solution</button>
         <button class="tab" data-tab="architecture">How It Works</button>
+        <button class="tab" data-tab="technical">Technical Architecture</button>
         <button class="tab" data-tab="roi">ROI & Impact</button>
         <button class="tab" data-tab="status">Current Status</button>
     </nav>
@@ -422,7 +423,7 @@
             <h2>Executive Summary</h2>
 
             <p>
-                The <strong>Sepsis Rebuttal Engine</strong> is an AI-powered system that automates the
+                The <strong>Sepsis Appeal Engine</strong> is an AI-powered system that automates the
                 drafting of DRG appeal letters when payors attempt to downgrade sepsis codes (DRG 870, 871, 872).
                 Using vector search and LLM technology, it reduces letter drafting time from 60+ minutes to under
                 10 minutes while maintaining quality through mandatory human review.
@@ -434,8 +435,8 @@
                     <span class="label">Time Reduction Per Letter</span>
                 </div>
                 <div class="kpi-card">
-                    <span class="number">4</span>
-                    <span class="label">Unity Catalog Tables</span>
+                    <span class="number">14</span>
+                    <span class="label">Clinical Note Types</span>
                 </div>
                 <div class="kpi-card">
                     <span class="number">100%</span>
@@ -450,6 +451,7 @@
             <h3>Key Differentiators</h3>
             <ul>
                 <li><strong>Vector Search:</strong> Finds the most similar past denial using embeddings - matches proven winning arguments to new cases</li>
+                <li><strong>Comprehensive Clinical Evidence:</strong> Pulls 14 note types from Clarity with automatic extraction of timestamped clinical data</li>
                 <li><strong>Knowledge Integration:</strong> Automatically includes Propel clinical criteria and learns from successful past appeals</li>
                 <li><strong>Built In-House:</strong> No vendor lock-in, full control over improvements and expansion</li>
                 <li><strong>Human-in-the-Loop:</strong> CDI specialists review and approve every letter - AI assists, humans decide</li>
@@ -543,7 +545,7 @@
             <h2>Our Solution</h2>
 
             <p>
-                The Sepsis Rebuttal Engine is a purpose-built system that automates the research and
+                The Sepsis Appeal Engine is a purpose-built system that automates the research and
                 drafting process while keeping CDI specialists in control of the final product.
             </p>
 
@@ -556,8 +558,8 @@
                     <p>
                         Processes denial letter PDFs: extracts text using Azure Document Intelligence,
                         uses LLM to identify account ID, payor, DRG codes, and sepsis relevance.
-                        Generates embeddings for vector search and joins with Clarity clinical notes
-                        (discharge summary, H&P).
+                        Generates embeddings for vector search and joins with <strong>14 clinical note types</strong>
+                        from Clarity (Progress Notes, Consults, H&P, Discharge Summary, ED Notes, and more).
                     </p>
                 </div>
             </div>
@@ -569,8 +571,8 @@
                     <p>
                         For each sepsis case: performs vector search to find the most similar past denial
                         from our gold letter library, includes the official Propel sepsis definition,
-                        and generates a complete rebuttal letter using the patient's clinical notes.
-                        Outputs Word documents for CDI review.
+                        <strong>extracts key clinical data with timestamps</strong> from long notes via LLM,
+                        and generates a complete appeal letter. Outputs Word documents for CDI review.
                     </p>
                 </div>
             </div>
@@ -581,7 +583,7 @@
                 <div class="benefit-card">
                     <div class="icon">&#128218;</div>
                     <h4>Gold Letters</h4>
-                    <p>Library of past winning rebuttals - proven arguments that worked</p>
+                    <p>Library of past winning appeals - proven arguments that worked</p>
                 </div>
                 <div class="benefit-card">
                     <div class="icon">&#128202;</div>
@@ -590,14 +592,47 @@
                 </div>
                 <div class="benefit-card">
                     <div class="icon">&#128196;</div>
-                    <h4>Clinical Notes</h4>
-                    <p>Discharge summary and H&P from Clarity - primary evidence</p>
+                    <h4>14 Clinical Note Types</h4>
+                    <p>Progress Notes, Consults, H&P, Discharge Summary, ED Notes, Nursing Notes, and more from Clarity</p>
                 </div>
                 <div class="benefit-card">
                     <div class="icon">&#128221;</div>
                     <h4>Denial Letter</h4>
                     <p>Full text passed to writer - addresses specific arguments</p>
                 </div>
+            </div>
+
+            <h3>Clinical Note Types (from Epic Clarity)</h3>
+            <table class="comparison-table">
+                <tr>
+                    <th>Code</th>
+                    <th>Note Type</th>
+                    <th>Purpose</th>
+                </tr>
+                <tr><td>1</td><td>Progress Notes</td><td>Daily physician documentation</td></tr>
+                <tr><td>2</td><td>Consults</td><td>Specialist consultations (ID, Pulm, etc.)</td></tr>
+                <tr><td>4</td><td>H&P</td><td>History & Physical - admission assessment</td></tr>
+                <tr><td>5</td><td>Discharge Summary</td><td>Complete hospitalization summary</td></tr>
+                <tr><td>6</td><td>ED Notes</td><td>Emergency department notes</td></tr>
+                <tr><td>7</td><td>Initial Assessments</td><td>Early clinical picture</td></tr>
+                <tr><td>8</td><td>ED Triage Notes</td><td>Arrival vitals, chief complaint</td></tr>
+                <tr><td>19</td><td>ED Provider Notes</td><td>ED physician assessment</td></tr>
+                <tr><td>29</td><td>Addendum Note</td><td>Updates/corrections to notes</td></tr>
+                <tr><td>32</td><td>Hospital Course</td><td>Timeline narrative</td></tr>
+                <tr><td>33</td><td>Subjective & Objective</td><td>Clinical findings (S&O)</td></tr>
+                <tr><td>38</td><td>Assessment & Plan Note</td><td>Physician reasoning</td></tr>
+                <tr><td>70</td><td>Nursing Note</td><td>Vital signs, observations</td></tr>
+                <tr><td>10000</td><td>Code Documentation</td><td>Code events (if applicable)</td></tr>
+            </table>
+
+            <div class="callout">
+                <h4>Smart Note Extraction</h4>
+                <p>
+                    Long clinical notes (>8,000 characters) are automatically processed by LLM to extract
+                    relevant clinical data <strong>with timestamps</strong>. This ensures the writer receives
+                    focused, timestamped evidence (e.g., "03/15/2024 08:00: Lactate 4.2, MAP 63") rather than
+                    overwhelming raw text. Shorter notes pass through unchanged.
+                </p>
             </div>
 
             <h3>Human-in-the-Loop Workflow</h3>
@@ -636,13 +671,14 @@
 │  │                   • Extract text (Document Intelligence)            │   │
 │  │                   • Parse info (LLM: account ID, payor, DRGs)      │   │
 │  │                   • Generate embedding (ada-002)                    │   │
-│  │                   • Join with Clarity clinical notes                │   │
+│  │                   • Join with 14 Clarity clinical note types        │   │
 │  │                                                                     │   │
 │  │  [Inference Table] ──► INFERENCE ──► [DOCX Letter]                 │   │
 │  │                        • Filter sepsis cases (is_sepsis flag)       │   │
 │  │                        • Vector search gold letters (cosine sim)    │   │
+│  │                        • Extract clinical data with timestamps      │   │
 │  │                        • Include Propel definition                  │   │
-│  │                        • Generate rebuttal (GPT-4.1)                │   │
+│  │                        • Generate appeal (GPT-4.1)                │   │
 │  │                        • Export to DOCX for review                  │   │
 │  │                                                                     │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
@@ -659,7 +695,7 @@
                 </tr>
                 <tr>
                     <td>fudgesicle_gold_letters</td>
-                    <td>Past winning rebuttals with denial embeddings for vector search</td>
+                    <td>Past winning appeals with denial embeddings for vector search</td>
                 </tr>
                 <tr>
                     <td>fudgesicle_propel_data</td>
@@ -671,7 +707,7 @@
                 </tr>
                 <tr>
                     <td>fudgesicle_inference_score</td>
-                    <td>Generated rebuttal letters with metadata (appends over time)</td>
+                    <td>Generated appeal letters with metadata (appends over time)</td>
                 </tr>
             </table>
 
@@ -712,6 +748,288 @@
                 <p>
                     The entire system runs on Mercy's existing Databricks and Azure environment.
                     We're leveraging services we already pay for, maximizing ROI on existing investments.
+                </p>
+            </div>
+        </section>
+
+        <!-- Technical Architecture Panel -->
+        <section id="technical" class="panel">
+            <h2>Technical Architecture</h2>
+            <p>
+                The Sepsis Appeal Engine is Mercy's first <strong>multi-agent AI system</strong> - an orchestrated
+                pipeline of specialized AI agents that collaborate to transform a denial PDF into a complete appeal letter.
+            </p>
+
+            <h3>Multi-Agent Orchestration</h3>
+            <div class="pipeline-visual">
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                              MULTI-AGENT ORCHESTRATION                                   │
+│                                                                                          │
+│  ┌────────────────────────────────────────────────────────────────────────────────────┐ │
+│  │                           STAGE 1: FEATURIZATION                                   │ │
+│  │                                                                                    │ │
+│  │   [Denial PDF]                                                                     │ │
+│  │        │                                                                           │ │
+│  │        ▼                                                                           │ │
+│  │   ┌─────────────────────┐                                                          │ │
+│  │   │  DOCUMENT INTEL     │  Azure AI Document Intelligence                          │ │
+│  │   │  AGENT              │  • OCR extraction from PDF                               │ │
+│  │   │                     │  • Page-by-page text output                              │ │
+│  │   └─────────┬───────────┘                                                          │ │
+│  │             │                                                                      │ │
+│  │             ▼                                                                      │ │
+│  │   ┌─────────────────────┐                                                          │ │
+│  │   │  PARSER AGENT       │  GPT-4.1 LLM Call #1                                     │ │
+│  │   │                     │  • Extract: hsp_account_id                               │ │
+│  │   │  "Structured Data   │  • Extract: payor name                                   │ │
+│  │   │   Extraction"       │  • Extract: original_drg, proposed_drg                   │ │
+│  │   │                     │  • Classify: is_sepsis (true/false)                      │ │
+│  │   └─────────┬───────────┘                                                          │ │
+│  │             │                                                                      │ │
+│  │             ▼                                                                      │ │
+│  │   ┌─────────────────────┐                                                          │ │
+│  │   │  EMBEDDING AGENT    │  text-embedding-ada-002                                  │ │
+│  │   │                     │  • 1536-dimensional vector                               │ │
+│  │   │  "Semantic          │  • Captures denial "meaning"                             │ │
+│  │   │   Fingerprint"      │  • Enables similarity search                             │ │
+│  │   └─────────┬───────────┘                                                          │ │
+│  │             │                                                                      │ │
+│  │             ▼                                                                      │ │
+│  │   ┌─────────────────────┐    ┌───────────────────────────────────────────────────┐ │ │
+│  │   │  CLARITY JOIN       │◄───│            EPIC CLARITY DATABASE                   │ │ │
+│  │   │                     │    │                                                    │ │ │
+│  │   │  "Clinical Context" │    │   14 CLINICAL NOTE TYPES INTEGRATED:               │ │ │
+│  │   │                     │    │   ┌────────────────┐  ┌────────────────┐           │ │ │
+│  │   │  Joins on           │    │   │ Progress Notes │  │ Consults       │           │ │ │
+│  │   │  hsp_account_id     │    │   │ H&P            │  │ Discharge Summ │           │ │ │
+│  │   │                     │    │   │ ED Notes       │  │ Initial Assess │           │ │ │
+│  │   │                     │    │   │ ED Triage      │  │ ED Provider    │           │ │ │
+│  │   │                     │    │   │ Addendum       │  │ Hospital Course│           │ │ │
+│  │   │                     │    │   │ Subj/Objective │  │ Assess & Plan  │           │ │ │
+│  │   │                     │    │   │ Nursing Notes  │  │ Code Docs      │           │ │ │
+│  │   │                     │    │   └────────────────┘  └────────────────┘           │ │ │
+│  │   └─────────┬───────────┘    │                                                    │ │ │
+│  │             │                │   Complete clinical picture per encounter          │ │ │
+│  │             │                └───────────────────────────────────────────────────┘ │ │
+│  │             ▼                                                                      │ │
+│  │   [Inference Table] ──► Unity Catalog: fudgesicle_inference                        │ │
+│  │                                                                                    │ │
+│  └────────────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                          │
+│  ┌────────────────────────────────────────────────────────────────────────────────────┐ │
+│  │                           STAGE 2: INFERENCE                                       │ │
+│  │                                                                                    │ │
+│  │   [Inference Table] ──► Filter: is_sepsis = true                                   │ │
+│  │        │                                                                           │ │
+│  │        ▼                                                                           │ │
+│  │   ┌─────────────────────┐    ┌─────────────────────┐                               │ │
+│  │   │  RETRIEVAL AGENT    │◄───│  Gold Letter        │                               │ │
+│  │   │                     │    │  Library            │                               │ │
+│  │   │  "Vector Search"    │    │  (Embeddings)       │                               │ │
+│  │   │                     │    │                     │                               │ │
+│  │   │  cosine_similarity( │    │  Past winning       │                               │ │
+│  │   │    denial_embedding,│    │  appeals with       │                               │ │
+│  │   │    gold_embedding   │    │  denial portions    │                               │ │
+│  │   │  )                  │    │                     │                               │ │
+│  │   └─────────┬───────────┘    └─────────────────────┘                               │ │
+│  │             │                                                                      │ │
+│  │             │ Best Match (highest similarity score)                                │ │
+│  │             ▼                                                                      │ │
+│  │   ┌─────────────────────┐                                                          │ │
+│  │   │  EXTRACTION AGENTS  │  GPT-4.1 LLM Calls (parallel, per note type)             │ │
+│  │   │                     │                                                          │ │
+│  │   │  "Clinical Data     │  For each note > 8,000 chars:                            │ │
+│  │   │   with Timestamps"  │  • Extract relevant clinical findings                    │ │
+│  │   │                     │  • Preserve timestamps for each data point               │ │
+│  │   │  ┌───┐ ┌───┐ ┌───┐  │  • Output: "03/15 08:00: Lactate 4.2, MAP 63"            │ │
+│  │   │  │PN │ │DC │ │HP │  │                                                          │ │
+│  │   │  └───┘ └───┘ └───┘  │  Up to 14 parallel extraction calls                      │ │
+│  │   │  ┌───┐ ┌───┐ ┌───┐  │  (one per long note type)                                │ │
+│  │   │  │ED │ │CN │ │...│  │                                                          │ │
+│  │   │  └───┘ └───┘ └───┘  │                                                          │ │
+│  │   └─────────┬───────────┘                                                          │ │
+│  │             │                                                                      │ │
+│  │             ▼                                                                      │ │
+│  │   ┌─────────────────────┐    ┌─────────────────────┐                               │ │
+│  │   │  WRITER AGENT       │◄───│  Propel Criteria    │                               │ │
+│  │   │                     │    │  (Sepsis Definition)│                               │ │
+│  │   │  GPT-4.1 LLM        │    └─────────────────────┘                               │ │
+│  │   │  "Appeal Generation"│                                                          │ │
+│  │   │                     │    CONTEXT WINDOW RECEIVES:                              │ │
+│  │   │  Crafts persuasive  │    • Original denial letter text                         │ │
+│  │   │  appeal using all   │    • Best-matching gold appeal (template)                │ │
+│  │   │  available context  │    • Propel sepsis criteria                              │ │
+│  │   │                     │    • 14 clinical notes (extracted/raw)                   │ │
+│  │   │                     │    • Patient demographics                                │ │
+│  │   └─────────┬───────────┘                                                          │ │
+│  │             │                                                                      │ │
+│  │             ▼                                                                      │ │
+│  │   ┌─────────────────────┐                                                          │ │
+│  │   │  DOCX EXPORT        │                                                          │ │
+│  │   │                     │  Formatted Word document with:                           │ │
+│  │   │  "Human Review      │  • Standardized header (patient, DRG, gold letter)       │ │
+│  │   │   Ready"            │  • Generated appeal body                                 │ │
+│  │   │                     │  • Ready for CDI specialist review                       │ │
+│  │   └─────────────────────┘                                                          │ │
+│  │                                                                                    │ │
+│  └────────────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘</div>
+
+            <h3>Agent Summary</h3>
+            <table class="comparison-table">
+                <tr>
+                    <th>Agent</th>
+                    <th>Technology</th>
+                    <th>Function</th>
+                    <th>Output</th>
+                </tr>
+                <tr>
+                    <td><strong>Document Intel</strong></td>
+                    <td>Azure AI Document Intelligence</td>
+                    <td>OCR extraction from PDF pages</td>
+                    <td>Raw text per page</td>
+                </tr>
+                <tr>
+                    <td><strong>Parser</strong></td>
+                    <td>GPT-4.1</td>
+                    <td>Extract structured fields from denial text</td>
+                    <td>account_id, payor, DRGs, is_sepsis</td>
+                </tr>
+                <tr>
+                    <td><strong>Embedding</strong></td>
+                    <td>text-embedding-ada-002</td>
+                    <td>Generate semantic vector</td>
+                    <td>1536-dim denial fingerprint</td>
+                </tr>
+                <tr>
+                    <td><strong>Retrieval</strong></td>
+                    <td>Cosine Similarity</td>
+                    <td>Find most similar past denial</td>
+                    <td>Best-match gold letter</td>
+                </tr>
+                <tr>
+                    <td><strong>Extraction (×14)</strong></td>
+                    <td>GPT-4.1 (parallel)</td>
+                    <td>Extract clinical data with timestamps</td>
+                    <td>Focused evidence per note type</td>
+                </tr>
+                <tr>
+                    <td><strong>Writer</strong></td>
+                    <td>GPT-4.1</td>
+                    <td>Generate complete appeal letter</td>
+                    <td>Persuasive appeal text</td>
+                </tr>
+            </table>
+
+            <h3>Why Multi-Agent Architecture?</h3>
+            <div class="benefit-grid">
+                <div class="benefit-card">
+                    <div class="icon">&#9881;</div>
+                    <h4>Specialization</h4>
+                    <p>Each agent is optimized for one task - better prompts, better results</p>
+                </div>
+                <div class="benefit-card">
+                    <div class="icon">&#9889;</div>
+                    <h4>Parallelization</h4>
+                    <p>Extraction agents run concurrently on Databricks - faster processing</p>
+                </div>
+                <div class="benefit-card">
+                    <div class="icon">&#128270;</div>
+                    <h4>Observability</h4>
+                    <p>Each agent's output is logged - easy debugging and quality monitoring</p>
+                </div>
+                <div class="benefit-card">
+                    <div class="icon">&#128736;</div>
+                    <h4>Maintainability</h4>
+                    <p>Update one agent without affecting others - isolated improvements</p>
+                </div>
+            </div>
+
+            <h3>LLM Call Summary</h3>
+            <div class="callout">
+                <h4>Per Case: 2-16 LLM Calls</h4>
+                <p>
+                    <strong>Minimum (2 calls):</strong> Parser + Writer (when all notes are short)<br>
+                    <strong>Maximum (16 calls):</strong> Parser + Writer + 14 Extraction calls (when all notes exceed 8K chars)<br>
+                    <strong>Typical:</strong> ~5-8 calls per case (parser, writer, 3-6 extractions)
+                </p>
+                <p style="margin-top: 1rem;">
+                    <strong>Cost per case:</strong> ~$0.10-0.25 depending on note lengths<br>
+                    <strong>Processing time:</strong> 30-90 seconds (parallelized extraction)
+                </p>
+            </div>
+
+            <h3>Data Flow</h3>
+            <table class="comparison-table">
+                <tr>
+                    <th>Stage</th>
+                    <th>Input</th>
+                    <th>Processing</th>
+                    <th>Output</th>
+                </tr>
+                <tr>
+                    <td>1. Ingest</td>
+                    <td>Denial PDF file</td>
+                    <td>Document Intelligence OCR</td>
+                    <td>Page-by-page text</td>
+                </tr>
+                <tr>
+                    <td>2. Parse</td>
+                    <td>Raw denial text</td>
+                    <td>GPT-4.1 structured extraction</td>
+                    <td>account_id, payor, DRGs, is_sepsis</td>
+                </tr>
+                <tr>
+                    <td>3. Embed</td>
+                    <td>Denial text</td>
+                    <td>ada-002 embedding</td>
+                    <td>1536-dim vector</td>
+                </tr>
+                <tr>
+                    <td>4. Enrich</td>
+                    <td>account_id</td>
+                    <td>Clarity SQL join</td>
+                    <td>14 clinical note types</td>
+                </tr>
+                <tr>
+                    <td>5. Store</td>
+                    <td>Complete record</td>
+                    <td>Delta Lake write</td>
+                    <td>fudgesicle_inference table</td>
+                </tr>
+                <tr>
+                    <td>6. Retrieve</td>
+                    <td>denial_embedding</td>
+                    <td>Cosine similarity search</td>
+                    <td>Best-match gold letter</td>
+                </tr>
+                <tr>
+                    <td>7. Extract</td>
+                    <td>Long clinical notes</td>
+                    <td>GPT-4.1 (parallel)</td>
+                    <td>Timestamped evidence</td>
+                </tr>
+                <tr>
+                    <td>8. Generate</td>
+                    <td>All context</td>
+                    <td>GPT-4.1 writer</td>
+                    <td>Appeal letter text</td>
+                </tr>
+                <tr>
+                    <td>9. Export</td>
+                    <td>Letter + metadata</td>
+                    <td>python-docx</td>
+                    <td>DOCX for review</td>
+                </tr>
+            </table>
+
+            <div class="callout success">
+                <h4>First Multi-Agent System at Mercy</h4>
+                <p>
+                    This architecture establishes a pattern for future AI initiatives. The same orchestration
+                    approach - specialized agents with clear interfaces - can be applied to other complex
+                    workflows across the organization. Lessons learned here accelerate future projects.
                 </p>
             </div>
         </section>
@@ -824,7 +1142,11 @@
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
                 <tr>
-                    <td>Clarity clinical notes join</td>
+                    <td>Clarity clinical notes (14 types)</td>
+                    <td><span class="status-badge ready">Complete</span></td>
+                </tr>
+                <tr>
+                    <td>Note extraction with timestamps</td>
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
                 <tr>
@@ -884,7 +1206,7 @@
     </main>
 
     <footer>
-        <p>Sepsis Rebuttal Engine | Mercy Hospital | Financial Data Science Team</p>
+        <p>Sepsis Appeal Engine | Mercy Hospital | Financial Data Science Team</p>
         <p>Executive Overview | January 2026</p>
     </footer>
 

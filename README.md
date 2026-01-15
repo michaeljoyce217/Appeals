@@ -1,4 +1,4 @@
-# Sepsis Rebuttal Engine
+# Sepsis Appeal Engine
 
 **Multi-Agent AI for DRG Appeal Letter Automation**
 
@@ -8,13 +8,13 @@ Automated generation of DRG appeal letters for sepsis-related insurance denials.
 
 ## Overview
 
-When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this system generates professional rebuttal letters by:
+When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this system generates professional appeal letters by:
 
 1. **Parsing denial letters** - LLM extracts payor, DRG codes, account ID, and determines if sepsis-related
 2. **Vector search** - Finds the most similar past denial from our gold standard library using embeddings
-3. **Learning from winners** - Uses the matched winning rebuttal as a template/guide
+3. **Learning from winners** - Uses the matched winning appeal as a template/guide
 4. **Applying clinical criteria** - Includes official Propel sepsis definitions
-5. **Generating rebuttals** - Creates patient-specific appeal letters using clinical notes from Clarity
+5. **Generating appeals** - Creates patient-specific appeal letters using clinical notes from Clarity
 
 ## Architecture
 
@@ -43,7 +43,7 @@ When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this sy
 │  │                        • Filter sepsis cases                        │   │
 │  │                        • Vector search gold letters                 │   │
 │  │                        • Include Propel definition                  │   │
-│  │                        • Generate rebuttal (LLM)                    │   │
+│  │                        • Generate appeal (LLM)                    │   │
 │  │                        • Export to DOCX for review                  │   │
 │  │                                                                     │   │
 │  └─────────────────────────────────────────────────────────────────────┘   │
@@ -58,11 +58,37 @@ When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this sy
 | Feature | Description |
 |---------|-------------|
 | **Vector Search** | Embeddings-based similarity matching finds the most relevant past denial |
-| **Gold Letter Learning** | Uses winning rebuttals as templates - proven arguments get reused |
+| **Gold Letter Learning** | Uses winning appeals as templates - proven arguments get reused |
 | **Propel Integration** | Official clinical criteria injected into prompts |
+| **Comprehensive Clinical Notes** | Pulls 7 note types from Clarity (see below) |
 | **Human-in-the-Loop** | All letters output as DOCX for CDI review before sending |
 | **Scope Filtering** | Built for expansion - currently filtered to sepsis (870/871/872) |
 | **No Vendor Lock-in** | Runs entirely on existing Databricks/Azure infrastructure |
+
+## Clinical Notes (from Epic Clarity)
+
+The system pulls **14 sepsis-relevant note types** for comprehensive clinical evidence:
+
+| Code | Note Type | Purpose |
+|------|-----------|---------|
+| 1 | **Progress Notes** | Daily physician documentation |
+| 2 | **Consults** | Specialist consultations (ID, Pulm, etc.) |
+| 4 | **H&P** | History & Physical - admission assessment |
+| 5 | **Discharge Summary** | Complete hospitalization summary |
+| 6 | **ED Notes** | Emergency department notes |
+| 7 | **Initial Assessments** | Early clinical picture |
+| 8 | **ED Triage Notes** | Arrival vitals, chief complaint |
+| 19 | **ED Provider Notes** | ED physician assessment |
+| 29 | **Addendum Note** | Updates/corrections to notes |
+| 32 | **Hospital Course** | Timeline narrative |
+| 33 | **Subjective & Objective** | Clinical findings (S&O) |
+| 38 | **Assessment & Plan Note** | Physician reasoning |
+| 70 | **Nursing Note** | Vital signs, observations |
+| 10000 | **Code Documentation** | Code events (if applicable) |
+
+Additional note types (OR notes, Therapy notes, etc.) are available but commented out. Uncomment as needed for other conditions.
+
+**Note Extraction**: Long notes (>8k chars) are automatically extracted via LLM to pull relevant clinical data with timestamps, reducing token usage while preserving key evidence.
 
 ## Repository Structure
 
@@ -73,12 +99,12 @@ SEPSIS/
 ├── model/
 │   └── inference.py          # Letter generation
 ├── utils/
-│   ├── gold_standard_rebuttals/  # Past winning appeal letters (PDFs)
-│   ├── Sample_Denial_Letters/    # New denial letters to process
-│   └── propel_data/              # Clinical criteria definitions (DOCX)
+│   ├── gold_standard_appeals/  # Past winning appeal letters (PDFs) + default template
+│   ├── sample_denial_letters/  # New denial letters to process (PDFs)
+│   ├── propel_data/            # Clinical criteria definitions (PDFs)
+│   └── outputs/                # Generated appeal letters (DOCX)
 ├── docs/
-│   └── rebuttal-assistant-guide.html  # Executive overview
-├── output/                   # Generated DOCX letters
+│   └── appeal-assistant-guide.html  # Executive overview
 ├── compare_denials.py        # Utility: check for duplicate denials
 ├── test_queries.sql          # Validation queries for Unity Catalog
 └── README.md
@@ -88,10 +114,10 @@ SEPSIS/
 
 | Table | Purpose |
 |-------|---------|
-| `dev.fin_ds.fudgesicle_gold_letters` | Past winning rebuttals with denial embeddings |
+| `dev.fin_ds.fudgesicle_gold_letters` | Past winning appeals with denial embeddings |
 | `dev.fin_ds.fudgesicle_propel_data` | Official clinical criteria (sepsis definition) |
 | `dev.fin_ds.fudgesicle_inference` | Denial cases ready for processing |
-| `dev.fin_ds.fudgesicle_inference_score` | Generated rebuttal letters |
+| `dev.fin_ds.fudgesicle_inference_score` | Generated appeal letters |
 
 ## Quick Start (Databricks)
 
@@ -99,8 +125,8 @@ SEPSIS/
 
 Copy files to Databricks notebooks and set the paths:
 ```python
-GOLD_LETTERS_PATH = "/Workspace/Repos/your-user/fudgesicle/utils/gold_standard_rebuttals"
-DENIAL_LETTERS_PATH = "/Workspace/Repos/your-user/fudgesicle/utils/Sample_Denial_Letters"
+GOLD_LETTERS_PATH = "/Workspace/Repos/your-user/fudgesicle/utils/gold_standard_appeals"
+DENIAL_LETTERS_PATH = "/Workspace/Repos/your-user/fudgesicle/utils/sample_denial_letters"
 PROPEL_DATA_PATH = "/Workspace/Repos/your-user/fudgesicle/utils/propel_data"
 ```
 
@@ -110,7 +136,7 @@ In `featurization.py`:
 ```python
 RUN_GOLD_INGESTION = True
 ```
-Run the notebook. This extracts rebuttals and denials from gold letter PDFs, generates embeddings, and stores in `fudgesicle_gold_letters`.
+Run the notebook. This extracts appeals and denials from gold letter PDFs, generates embeddings, and stores in `fudgesicle_gold_letters`.
 
 ### 3. Ingest Propel Definitions (one-time)
 
@@ -118,7 +144,7 @@ In `featurization.py`:
 ```python
 RUN_PROPEL_INGESTION = True
 ```
-Run the notebook. This reads DOCX files from `propel_data/` and stores in `fudgesicle_propel_data`.
+Run the notebook. This reads PDF files from `propel_data/`, extracts key clinical criteria via LLM, and stores in `fudgesicle_propel_data`.
 
 ### 4. Process New Denial Letters
 
@@ -135,7 +161,7 @@ Run the notebook. This:
 - Joins with Clarity clinical notes
 - Writes to `fudgesicle_inference`
 
-### 5. Generate Rebuttal Letters
+### 5. Generate Appeal Letters
 
 In `inference.py`:
 ```python
@@ -145,7 +171,7 @@ EXPORT_TO_DOCX = True   # Generate Word documents
 Run the notebook. For each sepsis case:
 - Finds best matching gold letter via vector search
 - Includes Propel sepsis definition
-- Generates rebuttal using clinical notes
+- Generates appeal using clinical notes
 - Exports DOCX to `output/` folder
 
 ## Configuration Flags
@@ -199,8 +225,8 @@ FROM dev.fin_ds.fudgesicle_inference;
 
 The architecture supports any denial type. To add a new condition (e.g., pneumonia):
 
-1. **Add clinical criteria**: Place `pneumonia.docx` in `utils/propel_data/`
-2. **Add gold letters**: Add winning pneumonia rebuttals to `gold_standard_rebuttals/`
+1. **Add clinical criteria**: Place `propel_pneumonia.pdf` in `utils/propel_data/`
+2. **Add gold letters**: Add winning pneumonia appeals to `gold_standard_appeals/`
 3. **Update scope filter**: Modify `SCOPE_FILTER` logic in inference.py
 4. **Run ingestion**: Re-run with ingestion flags enabled
 
