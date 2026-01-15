@@ -366,15 +366,45 @@ Format timestamps consistently as: MM/DD/YYYY HH:MM or MM/DD/YYYY if time not av
 {note_text}
 
 # What to Extract (with timestamps)
-## Vital Signs, Laboratory Values, Infection Evidence, Organ Dysfunction, Clinical Events, Physician Assessments
+
+## SOFA Score Components (PRIORITY - extract ALL available)
+- Respiration: PaO2/FiO2 ratio, SpO2/FiO2, oxygen requirements, ventilator settings
+- Coagulation: Platelet count
+- Liver: Bilirubin (total)
+- Cardiovascular: MAP, hypotension, vasopressor use (drug, dose)
+- CNS: GCS (Glasgow Coma Scale), mental status changes
+- Renal: Creatinine, urine output
+
+## Other Sepsis Markers
+- Lactate levels (CRITICAL - include all values with times)
+- WBC count, bands
+- Temperature (fever, hypothermia)
+- Heart rate, respiratory rate
+- Blood culture results, infection source
+- Antibiotic administration times
+
+## Clinical Events
+- Fluid resuscitation (volume, timing)
+- ICU admission/transfer
+- Physician assessments mentioning sepsis, SIRS, infection
 
 # Output Format
 Return a structured summary with timestamps. Example:
-VITAL SIGNS:
-- 03/15/2024 08:00: Temp 38.9°C, HR 112, BP 85/52 (MAP 63)
+SOFA COMPONENTS:
+- 03/15/2024 06:30: Creatinine 2.1, Platelets 95, Bilirubin 1.8
+- 03/15/2024 08:00: MAP 63, on norepinephrine 0.1 mcg/kg/min
+- 03/15/2024 08:00: GCS 14, PaO2/FiO2 280
 
-LABS:
-- 03/15/2024 06:30: Lactate 4.2, WBC 18.5, Creatinine 2.1
+LACTATE TREND:
+- 03/15/2024 06:30: Lactate 4.2
+- 03/15/2024 10:00: Lactate 2.8 (after fluids)
+
+VITAL SIGNS:
+- 03/15/2024 08:00: Temp 38.9°C, HR 112, BP 85/52
+
+INFECTION EVIDENCE:
+- 03/15/2024: Blood cultures positive for E. coli
+- 03/15/2024 07:00: Started on Zosyn
 
 Only include sections that have relevant data. Be thorough but concise.'''
 
@@ -594,7 +624,11 @@ Payor: {payor}
 2. ADDRESS EACH DENIAL ARGUMENT - quote the payer, then refute
 3. CITE CLINICAL EVIDENCE from provider notes FIRST
 4. INCLUDE TIMESTAMPS with clinical values
-5. Follow the Mercy Hospital template structure exactly
+5. QUANTIFY ORGAN DYSFUNCTION using SOFA criteria when available:
+   - Reference specific values: lactate, MAP, creatinine, platelets, bilirubin, GCS, PaO2/FiO2
+   - Example: "Patient demonstrated cardiovascular dysfunction with MAP of 63 requiring vasopressor support"
+   - Example: "Renal dysfunction evidenced by creatinine of 2.1 (baseline 0.9)"
+6. Follow the Mercy Hospital template structure exactly
 
 Return ONLY the letter text.'''
 
