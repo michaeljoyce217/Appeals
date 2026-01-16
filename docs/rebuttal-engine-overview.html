@@ -830,17 +830,24 @@
 │   └─────────┬───────────┘    └───────────────────────────────────────────────────┘       │
 │             │                                                                            │
 │             ▼                                                                            │
-│   ┌─────────────────────┐    ┌─────────────────────┐                                     │
-│   │  EMBEDDING +        │◄───│  Gold Letter        │                                     │
-│   │  RETRIEVAL AGENT    │    │  Library            │                                     │
-│   │                     │    │  (from Unity        │                                     │
-│   │  • Generate 1536-dim│    │   Catalog)          │                                     │
-│   │    denial embedding │    │                     │                                     │
-│   │  • Cosine similarity│    │  Past winning       │                                     │
-│   │    vs gold letters  │    │  appeals            │                                     │
-│   └─────────┬───────────┘    └─────────────────────┘                                     │
+│   ┌─────────────────────┐    ┌─────────────────────────────────────────────────┐         │
+│   │  EMBEDDING +        │◄───│  Gold Letter Library (Unity Catalog)             │         │
+│   │  RETRIEVAL AGENT    │    │                                                  │         │
+│   │                     │    │  Each gold letter contains:                      │         │
+│   │  text-embedding-    │    │  • Original DENIAL text (with embedding)         │         │
+│   │  ada-002            │    │  • Winning APPEAL text (used as template)        │         │
+│   │                     │    │                                                  │         │
+│   │  Process:           │    │  Logic: Find the past denial most similar to    │         │
+│   │  1. Embed new denial│    │  this new denial, then use its winning appeal   │         │
+│   │     (1536 dims)     │    │  as a template - proven arguments get reused    │         │
+│   │  2. Compare vs all  │    │                                                  │         │
+│   │     gold denial     │    │  Threshold: 0.7 cosine similarity               │         │
+│   │     embeddings      │    │  • Score >= 0.7: Use matched appeal template    │         │
+│   │  3. Return best     │    │  • Score < 0.7: Use default template instead    │         │
+│   │     match           │    │                                                  │         │
+│   └─────────┬───────────┘    └─────────────────────────────────────────────────┘         │
 │             │                                                                            │
-│             │ Best Match (or default template if score < 0.7)                            │
+│             │ Best Match: gold letter appeal text (or default template)                  │
 │             ▼                                                                            │
 │   ┌─────────────────────┐                                                                │
 │   │  EXTRACTION AGENTS  │  GPT-4.1 LLM (for notes > 8,000 chars)                         │
