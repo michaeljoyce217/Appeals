@@ -826,7 +826,9 @@
 │   │                     │    │   Nursing Notes   │  Code Docs      │              │       │
 │   │                     │    │                                                    │       │
 │   │                     │    │   Notes < 8,000 chars: pass through unchanged      │       │
-│   │                     │    │   Notes > 8,000 chars: LLM extracts SOFA data      │       │
+│   │                     │    │   Notes > 8,000 chars: LLM extracts key clinical   │       │
+│   │                     │    │     data (SOFA components, vitals, labs, infection │       │
+│   │                     │    │     evidence, timestamps) to support appeal        │       │
 │   └─────────┬───────────┘    └───────────────────────────────────────────────────┘       │
 │             │                                                                            │
 │             ▼                                                                            │
