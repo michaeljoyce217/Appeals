@@ -2,11 +2,14 @@
 # Sepsis Appeal Engine - Single Letter Processing
 #
 # END-TO-END PIPELINE FOR ONE DENIAL LETTER:
-# 1. Parse denial PDF → Extract text, account ID, payor, DRGs, sepsis flag
-# 2. Query Clarity → Get clinical notes for this one account
-# 3. Vector search → Find best matching gold letter
-# 4. Generate appeal → Use gold letter as template, clinical notes as evidence
-# 5. Output → DOCX file for CDI review
+# 1. Parse denial PDF → Extract text via OCR
+# 2. Vector search → Find best matching gold letter (uses denial text only)
+# 3. Extract denial info → LLM extracts account ID, payor, DRGs, sepsis flag
+# 4. Query Clarity → Get clinical notes for this account
+# 5. Extract clinical data → LLM extracts from long notes (>8k chars)
+# 6. Generate appeal → Use gold letter as template, clinical notes as evidence
+# 6.5. Assess strength → LLM evaluates letter against Propel criteria, argument structure, evidence quality
+# 7. Output → DOCX file with assessment section for CDI review
 #
 # PRODUCTION-LIKE WORKFLOW:
 # This mirrors how production will work - one denial at a time from Epic workqueue.
@@ -480,6 +483,241 @@ def extract_notes_for_case(clinical_data):
 print("Note extraction functions loaded")
 
 # =============================================================================
+# CELL 7.5: Appeal Strength Assessment
+# =============================================================================
+import json
+
+ASSESSMENT_PROMPT = '''You are evaluating the strength of a sepsis DRG appeal letter.
+
+═══ PROPEL SEPSIS CRITERIA (source: official definitions) ═══
+{propel_definition}
+
+═══ DENIAL LETTER (source: payor's denial) ═══
+{denial_text}
+
+═══ GOLD LETTER TEMPLATE USED (source: past winning appeal) ═══
+{gold_letter_text}
+
+═══ AVAILABLE CLINICAL EVIDENCE ═══
+
+── From Clinical Notes (source: Epic Clarity notes) ──
+{extracted_clinical_data}
+
+── From Structured Data (source: Epic Clarity tables) ──
+{structured_data}
+
+═══ GENERATED APPEAL LETTER (being evaluated) ═══
+{generated_letter}
+
+═══ EVALUATION INSTRUCTIONS ═══
+Evaluate this appeal letter and provide:
+
+1. OVERALL SCORE (1-10) and RATING (LOW for 1-4, MODERATE for 5-7, HIGH for 8-10)
+
+2. SUMMARY (2-3 sentences explaining the score)
+
+3. DETAILED BREAKDOWN with scores and specific findings:
+
+   a) PROPEL CRITERIA COVERAGE - Does the letter document:
+      - Suspected or confirmed infection
+      - Organ dysfunction (per SOFA criteria)
+      - Clinical response to treatment
+      Note what's present, what could be stronger, what's missing
+
+   b) ARGUMENT STRUCTURE - Does the letter:
+      - Directly address the payor's stated denial reason
+      - Follow the logical structure of the gold letter template
+      - Provide clear clinical reasoning
+
+   c) EVIDENCE QUALITY - Split into two parts:
+
+      From Clinical Notes:
+      - Are specific values cited (not just "elevated lactate")?
+      - Are timestamps present for key events?
+      - List any relevant evidence in the notes NOT cited in the letter
+
+      From Structured Data:
+      - Evaluate when available, otherwise note "pending integration"
+
+Return ONLY valid JSON in this exact format:
+{{
+  "overall_score": <1-10>,
+  "overall_rating": "<LOW|MODERATE|HIGH>",
+  "summary": "<2-3 sentence summary>",
+  "propel_criteria": {{
+    "score": <1-10>,
+    "source": "Propel definitions",
+    "findings": [
+      {{"status": "<present|could_strengthen|missing>", "item": "<description>"}}
+    ]
+  }},
+  "argument_structure": {{
+    "score": <1-10>,
+    "source": "denial letter, gold template",
+    "findings": [
+      {{"status": "<present|could_strengthen|missing>", "item": "<description>"}}
+    ]
+  }},
+  "evidence_quality": {{
+    "clinical_notes": {{
+      "score": <1-10>,
+      "source": "Epic Clarity notes",
+      "findings": [
+        {{"status": "<present|could_strengthen|missing>", "item": "<description>"}}
+      ]
+    }},
+    "structured_data": {{
+      "score": null,
+      "source": "Epic Clarity tables",
+      "findings": [],
+      "status": "pending_integration"
+    }}
+  }}
+}}'''
+
+
+def assess_appeal_strength(generated_letter, propel_definition, denial_text,
+                           extracted_notes, gold_letter_text):
+    """
+    Assess the strength of a generated appeal letter.
+    Returns assessment dict or None if assessment fails.
+    """
+    print("  Running strength assessment...")
+
+    # Format extracted notes for the prompt
+    notes_summary = []
+    for note_type, content in extracted_notes.items():
+        if content and content != "Not available":
+            # Truncate very long notes for the assessment
+            truncated = content[:2000] + "..." if len(content) > 2000 else content
+            notes_summary.append(f"## {note_type}\n{truncated}")
+    extracted_clinical_data = "\n\n".join(notes_summary) if notes_summary else "No clinical notes available"
+
+    # Structured data placeholder
+    structured_data = "Not yet available - structured data integration pending (labs, vitals, medications, procedures, ICD-10 codes)"
+
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[
+                {"role": "system", "content": "You are a clinical appeal quality assessor. Return only valid JSON."},
+                {"role": "user", "content": ASSESSMENT_PROMPT.format(
+                    propel_definition=propel_definition or "Propel criteria not available for this condition",
+                    denial_text=denial_text[:5000] if denial_text else "Denial text not available",
+                    gold_letter_text=gold_letter_text[:3000] if gold_letter_text else "No gold letter template used",
+                    extracted_clinical_data=extracted_clinical_data,
+                    structured_data=structured_data,
+                    generated_letter=generated_letter
+                )}
+            ],
+            temperature=0,
+            max_tokens=2000
+        )
+
+        raw_response = response.choices[0].message.content.strip()
+
+        # Parse JSON - handle potential markdown code blocks
+        if raw_response.startswith("```"):
+            # Remove markdown code block
+            raw_response = raw_response.split("```")[1]
+            if raw_response.startswith("json"):
+                raw_response = raw_response[4:]
+            raw_response = raw_response.strip()
+
+        assessment = json.loads(raw_response)
+
+        # Validate and clamp score
+        if "overall_score" in assessment:
+            assessment["overall_score"] = max(1, min(10, int(assessment["overall_score"])))
+
+        print(f"  Assessment complete: {assessment.get('overall_score', '?')}/10 - {assessment.get('overall_rating', '?')}")
+        return assessment
+
+    except json.JSONDecodeError as e:
+        print(f"  Warning: Assessment JSON parse error: {e}")
+        return None
+    except Exception as e:
+        print(f"  Warning: Assessment failed: {e}")
+        return None
+
+
+def format_assessment_for_docx(assessment):
+    """Format assessment dict into text for DOCX output."""
+    if not assessment:
+        return "Assessment unavailable: LLM assessment failed\n\nPlease review letter manually before sending."
+
+    status_symbols = {
+        "present": "✓",
+        "could_strengthen": "△",
+        "missing": "✗"
+    }
+
+    lines = []
+
+    # Overall score
+    lines.append(f"Overall Strength: {assessment.get('overall_score', '?')}/10 - {assessment.get('overall_rating', '?')}")
+    lines.append("")
+
+    # Summary
+    lines.append(f"Summary: {assessment.get('summary', 'No summary available')}")
+    lines.append("")
+
+    # Detailed Breakdown
+    lines.append("Detailed Breakdown:")
+    lines.append("┌" + "─" * 57 + "┐")
+
+    # Propel Criteria
+    propel = assessment.get("propel_criteria", {})
+    lines.append(f"│ PROPEL CRITERIA COVERAGE (from: {propel.get('source', 'Propel definitions')})".ljust(58) + "│")
+    lines.append(f"│ Score: {propel.get('score', '?')}/10".ljust(58) + "│")
+    for finding in propel.get("findings", []):
+        symbol = status_symbols.get(finding.get("status", ""), "?")
+        item = finding.get("item", "")[:50]
+        lines.append(f"│ {symbol} {item}".ljust(58) + "│")
+
+    lines.append("├" + "─" * 57 + "┤")
+
+    # Argument Structure
+    argument = assessment.get("argument_structure", {})
+    lines.append(f"│ ARGUMENT STRUCTURE (from: {argument.get('source', 'denial letter, gold template')})".ljust(58) + "│")
+    lines.append(f"│ Score: {argument.get('score', '?')}/10".ljust(58) + "│")
+    for finding in argument.get("findings", []):
+        symbol = status_symbols.get(finding.get("status", ""), "?")
+        item = finding.get("item", "")[:50]
+        lines.append(f"│ {symbol} {item}".ljust(58) + "│")
+
+    lines.append("├" + "─" * 57 + "┤")
+
+    # Evidence Quality
+    evidence = assessment.get("evidence_quality", {})
+    clinical = evidence.get("clinical_notes", {})
+    lines.append(f"│ EVIDENCE QUALITY".ljust(58) + "│")
+    lines.append(f"│".ljust(58) + "│")
+    lines.append(f"│ From Clinical Notes (from: {clinical.get('source', 'Epic Clarity notes')}): {clinical.get('score', '?')}/10".ljust(58) + "│")
+    for finding in clinical.get("findings", []):
+        symbol = status_symbols.get(finding.get("status", ""), "?")
+        item = finding.get("item", "")[:48]
+        lines.append(f"│ {symbol} {item}".ljust(58) + "│")
+
+    lines.append(f"│".ljust(58) + "│")
+    structured = evidence.get("structured_data", {})
+    if structured.get("status") == "pending_integration":
+        lines.append(f"│ From Structured Data: (not yet available)".ljust(58) + "│")
+    else:
+        lines.append(f"│ From Structured Data: {structured.get('score', '?')}/10".ljust(58) + "│")
+        for finding in structured.get("findings", []):
+            symbol = status_symbols.get(finding.get("status", ""), "?")
+            item = finding.get("item", "")[:48]
+            lines.append(f"│ {symbol} {item}".ljust(58) + "│")
+
+    lines.append("└" + "─" * 57 + "┘")
+
+    return "\n".join(lines)
+
+
+print("Assessment functions loaded")
+
+# =============================================================================
 # CELL 8: Load Knowledge Base (Gold Letters + Propel)
 # =============================================================================
 print("\n" + "="*60)
@@ -795,6 +1033,26 @@ else:
             print(f"  Generated {len(letter_text)} character letter")
 
             # ---------------------------------------------------------------------
+            # STEP 6.5: Assess appeal strength
+            # ---------------------------------------------------------------------
+            print("\nStep 6.5: Assessing appeal strength...")
+
+            # Get propel definition for assessment
+            propel_def_for_assessment = propel_definitions.get("sepsis", None) if denial_info['is_sepsis'] else None
+
+            # Get gold letter text for assessment
+            gold_letter_text_for_assessment = gold_letter.get("appeal_text", "") if gold_letter else ""
+
+            # Run assessment
+            assessment = assess_appeal_strength(
+                generated_letter=letter_text,
+                propel_definition=propel_def_for_assessment,
+                denial_text=denial_text,
+                extracted_notes=extracted_notes,
+                gold_letter_text=gold_letter_text_for_assessment
+            )
+
+            # ---------------------------------------------------------------------
             # STEP 7: Export to DOCX
             # ---------------------------------------------------------------------
             if EXPORT_TO_DOCX:
@@ -837,7 +1095,19 @@ else:
                 meta.add_run("Gold Letter: ").bold = True
                 meta.add_run(f"{gold_letter['source_file'] if gold_letter else 'None'} (score: {gold_letter_score:.3f})\n")
 
-                doc.add_paragraph("─" * 60)
+                # Assessment section
+                doc.add_paragraph("═" * 55)
+                assessment_header = doc.add_paragraph()
+                assessment_header.add_run("APPEAL STRENGTH ASSESSMENT (Internal Review Only)").bold = True
+                doc.add_paragraph("═" * 55)
+
+                assessment_text = format_assessment_for_docx(assessment)
+                for line in assessment_text.split('\n'):
+                    p = doc.add_paragraph(line)
+                    p.paragraph_format.space_after = Pt(0)
+
+                doc.add_paragraph("═" * 55)
+                doc.add_paragraph()  # Blank line before letter
 
                 # Letter content - parse markdown bold
                 for paragraph in letter_text.split('\n\n'):
@@ -863,6 +1133,10 @@ else:
             print(f"Patient: {clinical_data.get('formatted_name', 'Unknown')}")
             print(f"Account: {account_id}")
             print(f"Letter length: {len(letter_text)} chars")
+            if assessment:
+                print(f"Strength: {assessment.get('overall_score', '?')}/10 - {assessment.get('overall_rating', '?')}")
+            else:
+                print(f"Strength: Assessment unavailable")
             if EXPORT_TO_DOCX:
                 print(f"Output: {filepath}")
 
