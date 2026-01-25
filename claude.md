@@ -62,7 +62,8 @@ Run for each denial letter:
 | 4. Clarity Query | Spark SQL (optimized) | Get 14 clinical note types for this account |
 | 5. Note Extraction | GPT-4.1 | Extract SOFA components + clinical data with timestamps |
 | 6. Letter Generation | GPT-4.1 | Generate appeal using gold letter + clinical evidence |
-| 7. Export | python-docx | Output DOCX with markdown bold parsing |
+| 6.5. Strength Assessment | GPT-4.1 | Evaluate letter against Propel criteria, argument structure, evidence quality |
+| 7. Export | python-docx | Output DOCX with assessment section + markdown bold parsing |
 
 ---
 
@@ -94,6 +95,19 @@ Note extraction prioritizes organ dysfunction data for quantifying sepsis severi
 
 ### Smart Note Extraction
 Notes >8,000 chars are automatically extracted via LLM to pull relevant clinical data WITH timestamps (e.g., "03/15/2024 08:00: Lactate 4.2, MAP 63").
+
+### Appeal Strength Assessment (NEW)
+After letter generation, an LLM evaluates the appeal and produces:
+- **Overall score** (1-10) with LOW/MODERATE/HIGH rating
+- **Summary** (2-3 sentences explaining the score)
+- **Detailed breakdown** scoring three dimensions:
+  - Propel Criteria Coverage (from: Propel definitions)
+  - Argument Structure (from: denial letter, gold template)
+  - Evidence Quality (from: clinical notes; structured data pending)
+
+Each finding is marked ✓ present, △ could strengthen, or ✗ missing. The "missing" items in Evidence Quality flag specific data points from clinical notes that weren't cited in the letter.
+
+Assessment appears in DOCX before the letter body for CDI reviewer reference.
 
 ### Conservative DRG Extraction
 Parser only extracts DRG codes if explicitly stated as numbers in the denial letter. Returns "Unknown" rather than hallucinating plausible codes.
