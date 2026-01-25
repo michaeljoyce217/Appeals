@@ -320,3 +320,191 @@ The assessment never blocks letter generation.
 | Structured data added | Enable `evidence_quality.structured_data` scoring |
 | Enough letters processed | Correlate scores with actual appeal outcomes (won/lost) |
 | Patterns emerge | Add payor-specific scoring adjustments |
+
+---
+
+## Appendix: Structured Data Extraction Specification
+
+### Overview
+
+Structured data (labs, vitals, meds, procedures, ICD-10) will be:
+1. Queried from separate Clarity tables
+2. Merged into a single chronological timeline
+3. Extracted by LLM for sepsis-relevant data (runs parallel to note extraction)
+4. Fed to both the writer LLM and the strength assessment
+
+```
+Step 5a: Extract from clinical notes (LLM)  ─┐
+                                             ├─► Step 6: Generate appeal
+Step 5b: Extract from structured data (LLM) ─┘
+```
+
+---
+
+### 1. SOFA Score Components (Organ Dysfunction Quantification)
+
+| System | Data Points | Critical Thresholds | SOFA Points |
+|--------|-------------|---------------------|-------------|
+| **Respiratory** | PaO2, FiO2, PaO2/FiO2 ratio, SpO2/FiO2 | P/F ≥400 (0), <400 (1), <300 (2), <200 w/vent (3), <100 w/vent (4) | 0-4 |
+| **Coagulation** | Platelet count | ≥150k (0), <150k (1), <100k (2), <50k (3), <20k (4) | 0-4 |
+| **Liver** | Total bilirubin | <1.2 (0), 1.2-1.9 (1), 2.0-5.9 (2), 6.0-11.9 (3), >12.0 (4) mg/dL | 0-4 |
+| **Cardiovascular** | MAP, vasopressor type/dose/duration | MAP ≥70 (0), <70 (1), dopa <5 (2), dopa 5-15 or norepi ≤0.1 (3), dopa >15 or norepi >0.1 (4) µg/kg/min | 0-4 |
+| **CNS** | GCS | 15 (0), 13-14 (1), 10-12 (2), 6-9 (3), <6 (4) | 0-4 |
+| **Renal** | Creatinine, urine output | Cr <1.2 (0), 1.2-1.9 (1), 2.0-3.4 (2), 3.5-4.9 (3), >5.0 or UO <200mL/day (4) mg/dL | 0-4 |
+
+**Key threshold:** SOFA ≥2 = organ dysfunction = sepsis diagnosis per Sepsis-3
+
+---
+
+### 2. Lactate (Critical - All Values with Timestamps)
+
+| Threshold | Clinical Significance |
+|-----------|----------------------|
+| >1.0 mmol/L | Tissue hypoperfusion marker |
+| **>2.0 mmol/L** | Sepsis indicator, requires repeat measurement |
+| **>4.0 mmol/L** | Severe - triggers aggressive fluid resuscitation |
+| **Clearance ≥10-20%** per 2 hours | Target for successful resuscitation |
+| Trend normalization | Predicts survival; failure to clear = reassess treatment |
+
+**Extract:** Initial value, all subsequent values, timestamps, calculate clearance %
+
+---
+
+### 3. Infection Markers
+
+| Marker | Normal | Sepsis Threshold | Notes |
+|--------|--------|------------------|-------|
+| **Procalcitonin (PCT)** | <0.05 ng/mL | **>0.5 ng/mL** (sens 75%); **>10 ng/mL** highly specific | More specific than CRP for bacterial infection |
+| **CRP** | <3 mg/L | **>8 mg/L** | Less specific, elevated in any inflammation |
+| **WBC** | 4.5-11k/µL | **<4k or >12k** | SIRS criterion |
+| **Bands** | <5% | **>10%** | Left shift = active infection |
+| **Blood cultures** | Negative | Positive | Confirms infection source, identifies organism |
+| **Urine cultures** | Negative | Positive | Source identification |
+
+---
+
+### 4. Vital Signs (qSOFA + SIRS Criteria)
+
+| Vital | SIRS Criterion | qSOFA Criterion | Septic Shock |
+|-------|---------------|-----------------|--------------|
+| **Temperature** | <36°C or >38°C | - | - |
+| **Heart rate** | >90 bpm | - | - |
+| **Respiratory rate** | >20/min | **≥22/min** | - |
+| **Systolic BP** | - | **≤100 mmHg** | - |
+| **MAP** | - | - | **<65 mmHg** requiring vasopressors |
+| **Mental status** | - | GCS <15 | - |
+
+**qSOFA ≥2** = high mortality risk
+**SIRS ≥2 criteria** = systemic inflammatory response
+
+---
+
+### 5. SEP-1 Bundle Compliance (Timing Critical for Appeals)
+
+#### 3-Hour Bundle (from severe sepsis recognition)
+
+| Intervention | Requirement | Data to Extract |
+|--------------|-------------|-----------------|
+| **Lactate** | Measure within 3 hours | Lab timestamp, value |
+| **Blood cultures** | Draw before antibiotics | Collection timestamp |
+| **Broad-spectrum antibiotics** | Within 3 hours (1 hour for shock) | Med name, admin timestamp |
+| **Crystalloid fluids** | 30 mL/kg if hypotensive OR lactate ≥4 | Fluid type, volume, start time |
+
+#### 6-Hour Bundle
+
+| Intervention | Requirement | Data to Extract |
+|--------------|-------------|-----------------|
+| **Repeat lactate** | If initial ≥2 mmol/L | Lab timestamp, value, clearance % |
+| **Vasopressors** | If MAP <65 after fluids | Drug, dose, start time |
+| **Volume status reassessment** | If persistent hypotension or lactate ≥4 | Documentation timestamp |
+
+---
+
+### 6. Vasopressor Details (For Septic Shock)
+
+| Drug | Starting Dose | Add Vasopressin Threshold | High Dose (Refractory) |
+|------|---------------|---------------------------|------------------------|
+| **Norepinephrine** | 0.01-0.05 µg/kg/min | 0.25-0.5 µg/kg/min | **≥1 µg/kg/min** |
+| **Vasopressin** | 0.01-0.03 U/min (fixed) | Added as adjunct | 0.04 U/min max |
+| **Dopamine** | 5 µg/kg/min | - | >15 µg/kg/min |
+| **Epinephrine** | 0.01 µg/kg/min | Rescue agent | >0.1 µg/kg/min |
+| **Phenylephrine** | 0.5-2 µg/kg/min | Alternative | - |
+| **Dobutamine** | 2.5 µg/kg/min | Cardiac dysfunction | 20 µg/kg/min |
+
+**Extract:** Drug name, dose (µg/kg/min), start time, duration, dose changes with timestamps
+
+---
+
+### 7. Fluid Resuscitation
+
+| Parameter | Target/Threshold |
+|-----------|------------------|
+| **Initial bolus** | 30 mL/kg crystalloid within 3 hours |
+| **Fluid type** | Balanced crystalloids preferred (LR) over NS |
+| **Total volume** | Track cumulative for fluid balance |
+| **Response assessment** | Dynamic measures (SVV, passive leg raise) |
+
+---
+
+### 8. Renal Function / Urine Output (AKI Staging)
+
+| Parameter | Stage 1 | Stage 2 | Stage 3 |
+|-----------|---------|---------|---------|
+| **Urine output** | <0.5 mL/kg/h for 6-12h | <0.5 mL/kg/h for ≥12h | <0.3 mL/kg/h for ≥24h OR anuria ≥12h |
+| **Creatinine** | 1.5-1.9x baseline | 2.0-2.9x baseline | 3.0x baseline OR ≥4.0 mg/dL OR dialysis |
+
+**Key:** UO <0.5 mL/kg/h for 3-5 consecutive hours predicts AKI progression
+
+---
+
+### 9. ICD-10 Codes to Flag
+
+| Code | Description | DRG Impact |
+|------|-------------|------------|
+| **A41.9** | Sepsis, unspecified | Base sepsis |
+| **A41.01/.02** | Sepsis due to MSSA/MRSA | Organism-specific |
+| **R65.20** | Severe sepsis without shock | Higher DRG |
+| **R65.21** | Severe sepsis with septic shock | Highest DRG (870) |
+| **A40.x** | Streptococcal sepsis | - |
+| **Infection codes** | Source identification | Supporting |
+
+---
+
+### 10. Additional Labs
+
+| Lab | Why It Matters |
+|-----|----------------|
+| BUN | Renal function, hydration |
+| Sodium, Potassium | Electrolyte derangement |
+| Glucose | Stress hyperglycemia |
+| PT/INR, PTT, Fibrinogen, D-dimer | Coagulopathy / DIC |
+| Troponin, BNP | Cardiac dysfunction |
+| Albumin | Nutritional status |
+| AST, ALT, Ammonia | Hepatic dysfunction |
+
+---
+
+### Extraction Prompt Strategy
+
+The structured data extractor LLM should:
+
+1. **Organize chronologically** by timestamp
+2. **Flag SOFA-relevant data** with calculated points
+3. **Highlight bundle compliance** - 3-hour and 6-hour targets met?
+4. **Calculate lactate clearance** if multiple values
+5. **Note trends** - improving vs. worsening
+6. **Flag missing data** - what wasn't documented?
+
+---
+
+### Sources
+
+- [Sepsis-3 Definition (JAMA/PMC)](https://pmc.ncbi.nlm.nih.gov/articles/PMC4968574/)
+- [SEP-1 Bundle Compliance](https://pmc.ncbi.nlm.nih.gov/articles/PMC5396984/)
+- [Lactate Clearance Targets](https://pmc.ncbi.nlm.nih.gov/articles/PMC5496745/)
+- [Procalcitonin/CRP Thresholds](https://pmc.ncbi.nlm.nih.gov/articles/PMC5564169/)
+- [Vasopressor Dosing](https://pmc.ncbi.nlm.nih.gov/articles/PMC7333107/)
+- [Antibiotic Timing](https://pmc.ncbi.nlm.nih.gov/articles/PMC5649973/)
+- [Fluid Resuscitation](https://pmc.ncbi.nlm.nih.gov/articles/PMC7963440/)
+- [Urine Output/AKI](https://pmc.ncbi.nlm.nih.gov/articles/PMC10228087/)
+- [SEP-1 Overview (Cytovale)](https://cytovale.com/what-is-sep-1-essential-insights-for-improving-sepsis-care-outcomes/)
