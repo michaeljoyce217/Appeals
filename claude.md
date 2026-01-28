@@ -34,7 +34,8 @@ SEPSIS/
 │   └── outputs/                      # Generated appeal letters (DOCX files)
 ├── docs/
 │   ├── plans/                        # Design documents
-│   └── rebuttal-engine-overview.html # Executive overview with Technical Architecture
+│   ├── rebuttal-engine-overview.html # Technical overview (tabbed, detailed)
+│   └── appeals-team-overview.html    # Simplified overview for appeals team
 ├── compare_denials.py                # Utility: check for duplicate denials
 ├── test_queries.sql                  # Validation queries for Unity Catalog
 ├── README.md                         # Project documentation
@@ -63,18 +64,19 @@ All data gathering for a single case:
 | 2. Extract Denial Info | GPT-4.1 | Extract: account_id, payor, DRGs, is_sepsis |
 | 3. Query Clinical Notes | Spark SQL | Get 14 note types from Epic Clarity |
 | 4. Extract Clinical Notes | GPT-4.1 | Extract SOFA components + clinical data with timestamps |
-| 5. Query Structured Data | Spark SQL | Get labs, vitals, meds, diagnoses from Clarity |
-| 6. Extract Structured Summary | GPT-4.1 | Summarize sepsis-relevant labs/vitals/meds |
-| 7. Detect Conflicts | GPT-4.1 | Compare notes vs structured data for discrepancies |
+| 5. Query Structured Data | Spark SQL | Get labs, vitals, meds from Clarity |
+| 6. Query Diagnoses | Spark SQL | Get DX records (DX_ID, DX_NAME) from CLARITY_EDG |
+| 7. Extract Structured Summary | GPT-4.1 | Summarize sepsis-relevant data with diagnosis descriptions |
+| 8. Detect Conflicts | GPT-4.1 | Compare notes vs structured data for discrepancies |
 
 ### Generation: inference.py
 Run for each denial letter (imports functions from featurization_inference.py):
 
 | Step | Technology | Function |
 |------|------------|----------|
-| 1. Data Prep | featurization_inference.py | Run steps 1-7 above |
+| 1. Data Prep | featurization_inference.py | Run steps 1-8 above |
 | 2. Vector Search | Cosine Similarity | Find best-matching gold letter (uses denial text only) |
-| 3. Letter Generation | GPT-4.1 | Generate appeal using gold letter + notes + structured data |
+| 3. Letter Generation | GPT-4.1 | Generate appeal using gold letter + notes + structured data + diagnoses |
 | 4. Strength Assessment | GPT-4.1 | Evaluate letter against Propel criteria, argument structure, evidence quality |
 | 5. Export | python-docx | Output DOCX with assessment + conflicts appendix |
 
@@ -118,6 +120,12 @@ Labs, vitals, and medications are queried from Clarity and summarized by LLM for
 - **Labs:** Lactate trends, WBC, procalcitonin, cultures, organ function (creatinine, bilirubin, platelets)
 - **Vitals:** Temperature, MAP, heart rate, respiratory rate, SpO2, GCS
 - **Meds:** Antibiotic timing (SEP-1 compliance), vasopressor initiation, fluid resuscitation
+
+### Diagnosis Records (DX_NAME)
+We query DX records directly from Epic's CLARITY_EDG table - these are more granular than ICD-10 codes:
+- **DX_NAME** is the specific clinical description (e.g., "Severe sepsis with septic shock due to MRSA")
+- **DX_ID** provides traceability to the source record
+- ICD-10 codes are NOT used - DX_NAME is what we quote in appeals
 
 ### Smart Note Extraction
 Notes >8,000 chars are automatically extracted via LLM to pull relevant clinical data WITH timestamps (e.g., "03/15/2024 08:00: Lactate 4.2, MAP 63").
