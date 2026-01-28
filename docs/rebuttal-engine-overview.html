@@ -556,7 +556,7 @@
             <div class="workflow-step">
                 <div class="step-number">1</div>
                 <div class="step-content">
-                    <h4>One-Time Setup (featurization.py)</h4>
+                    <h4>One-Time Setup (featurization_train.py)</h4>
                     <p>
                         Run once to populate the knowledge base: ingests gold standard letter PDFs
                         (extracts appeal/denial portions, generates embeddings) and Propel clinical criteria PDFs
@@ -568,13 +568,24 @@
             <div class="workflow-step">
                 <div class="step-number">2</div>
                 <div class="step-content">
-                    <h4>Per-Letter Processing (inference.py)</h4>
+                    <h4>Per-Case Data Prep (featurization_inference.py)</h4>
                     <p>
-                        Processes one denial PDF end-to-end: parses the PDF, performs vector search to find
-                        the best matching gold letter (uses denial text only), extracts account ID/payor/DRGs via LLM,
-                        queries Clarity for this account's <strong>14 clinical note types</strong>,
-                        <strong>extracts key clinical data with timestamps</strong> from long notes,
-                        and generates a complete appeal letter. Outputs a DOCX file for CDI review.
+                        Gathers all data for a single case: parses the denial PDF, extracts account ID/payor/DRGs via LLM,
+                        queries Clarity for <strong>14 clinical note types</strong> and <strong>structured data</strong>
+                        (labs, vitals, meds), extracts key clinical data with timestamps, and
+                        <strong>detects conflicts</strong> between physician notes and structured data.
+                    </p>
+                </div>
+            </div>
+
+            <div class="workflow-step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>Letter Generation (inference.py)</h4>
+                    <p>
+                        Generates the appeal letter: performs vector search to find the best matching gold letter,
+                        generates appeal using gold letter + clinical notes + structured data,
+                        assesses appeal strength, and exports DOCX with assessment and conflicts appendix.
                     </p>
                     <p style="font-size: 0.9rem; color: #666; margin-top: 0.5rem;">
                         <em><strong>POC vs Production:</strong> In POC mode, account ID is extracted from denial text (some generic denials may lack this).
@@ -600,6 +611,11 @@
                     <div class="icon">&#128196;</div>
                     <h4>14 Clinical Note Types</h4>
                     <p>Progress Notes, Consults, H&P, Discharge Summary, ED Notes, Nursing Notes, and more from Clarity</p>
+                </div>
+                <div class="benefit-card">
+                    <div class="icon">&#128200;</div>
+                    <h4>Structured Data</h4>
+                    <p>Labs, vitals, meds queried from Clarity - objective supporting evidence</p>
                 </div>
                 <div class="benefit-card">
                     <div class="icon">&#128221;</div>
@@ -672,6 +688,23 @@
                 </p>
             </div>
 
+            <div class="callout important">
+                <h4>Conflict Detection</h4>
+                <p>
+                    The system compares physician notes (primary evidence) against structured data (supporting evidence)
+                    to identify discrepancies. For example:
+                </p>
+                <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
+                    <li>Note says "MAP maintained >65" but vitals show MAP values below 65</li>
+                    <li>Note says "lactate normalized" but labs show lactate still elevated</li>
+                    <li>Note documents vasopressor use but no matching medication records found</li>
+                </ul>
+                <p style="margin-top: 0.5rem;">
+                    Conflicts are flagged in an appendix of the DOCX output for CDI reviewer attention. The writer
+                    uses physician notes as primary evidence while structured data provides objective support.
+                </p>
+            </div>
+
             <div class="callout success">
                 <h4>Appeal Strength Assessment</h4>
                 <p>
@@ -707,34 +740,30 @@
             <h3>System Architecture</h3>
             <div class="pipeline-visual">
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    KNOWLEDGE LAYER (One-Time Setup)                         │
+│               KNOWLEDGE LAYER (featurization_train.py - run once)           │
 │  ┌──────────────┐    ┌──────────────┐                                      │
 │  │    Propel    │    │    Gold      │                                      │
 │  │   Criteria   │    │   Letters    │                                      │
 │  │  (propel_    │    │  (gold_      │                                      │
 │  │   data)      │    │   letters)   │                                      │
 │  └──────────────┘    └──────────────┘                                      │
-│         ▲                   ▲                                               │
-│         └─────────┬─────────┘                                               │
-│                   │                                                         │
-│          featurization.py (run once)                                        │
-│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                 PER-LETTER PROCESSING (inference.py)                        │
+│           DATA PREP LAYER (featurization_inference.py - per case)           │
 │                                                                             │
-│  [Denial PDF] ──► inference.py ──► [DOCX Appeal Letter]                    │
+│  [Denial PDF] ──► Parse & Extract Info ──► Query Clinical Notes            │
+│                                       ──► Query Structured Data             │
+│                                       ──► Detect Conflicts                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│               GENERATION LAYER (inference.py - per case)                    │
 │                                                                             │
-│  Step 1: Parse PDF (Document Intelligence)                                  │
-│  Step 2: Vector search for best gold letter (uses denial text only)        │
-│  Step 3: Extract denial info (LLM: account ID, payor, DRGs)                │
-│  Step 4: Query Clarity for this account's clinical notes                   │
-│  Step 5: Extract clinical data from long notes (LLM)                       │
-│  Step 6: Generate appeal letter (LLM)                                      │
-│  Step 6.5: Assess appeal strength (LLM)                                    │
-│  Step 7: Export to DOCX (includes assessment section)                      │
-│                                                                             │
+│  Step 1: Vector search for best gold letter                                 │
+│  Step 2: Generate appeal (LLM: gold letter + notes + structured data)       │
+│  Step 3: Assess strength (LLM: Propel criteria, evidence quality)           │
+│  Step 4: Export to DOCX (includes conflicts appendix if any)                │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 [DOCX Letter] ──► CDI Review ──► Approved Letter ──► Send to Payor</div>
@@ -755,36 +784,32 @@
                 </tr>
             </table>
 
-            <h3>Structured Data Tables (Future - via structured_data_ingestion.py)</h3>
+            <h3>Structured Data (Queried at Inference Time)</h3>
+            <p style="margin-bottom: 1rem;">
+                Structured data is queried directly from Clarity by <code>featurization_inference.py</code> - no intermediate tables needed:
+            </p>
             <table class="comparison-table">
                 <tr>
-                    <th>Table</th>
+                    <th>Data Type</th>
                     <th>Contents</th>
                 </tr>
                 <tr>
-                    <td>fudgesicle_labs</td>
+                    <td>Labs</td>
                     <td>Lab results with timestamps (lactate, CBC, BMP, LFTs, cultures)</td>
                 </tr>
                 <tr>
-                    <td>fudgesicle_vitals</td>
+                    <td>Vitals</td>
                     <td>Vital signs (temp, HR, RR, BP, MAP, SpO2, GCS, UO)</td>
                 </tr>
                 <tr>
-                    <td>fudgesicle_meds</td>
+                    <td>Meds</td>
                     <td>Medication administrations (antibiotics, vasopressors, fluids)</td>
                 </tr>
                 <tr>
-                    <td>fudgesicle_procedures</td>
-                    <td>Procedures (lines, intubation, dialysis)</td>
-                </tr>
-                <tr>
-                    <td>fudgesicle_icd10</td>
-                    <td>ICD-10 diagnosis codes</td>
+                    <td>Diagnoses</td>
+                    <td>DX records with clinical descriptions (more granular than ICD-10 codes)</td>
                 </tr>
             </table>
-            <p style="font-size: 0.9rem; color: #666;">
-                <em>Note: Structured data ingestion is a standalone script, not yet integrated with inference.py.</em>
-            </p>
 
             <h3>Technology Stack</h3>
             <table class="comparison-table">
@@ -1002,7 +1027,7 @@
             </table>
             <p style="font-size: 0.85rem; color: #666; margin-top: -0.5rem;">
                 <em>*POC only: Extraction Agent extracts account_id from denial text. In production, workqueue provides this directly - Extraction Agent becomes unnecessary.</em><br>
-                <em>**Runs separately via structured_data_ingestion.py. Will be integrated into featurization.py.</em>
+                <em>**Now integrated into featurization_inference.py - runs automatically for every case.</em>
             </p>
 
             <h3>Why Multi-Agent Architecture?</h3>
@@ -1080,15 +1105,21 @@
                     <td>$0.03</td>
                 </tr>
                 <tr>
+                    <td>Conflict detection</td>
+                    <td>~6,000</td>
+                    <td>~500</td>
+                    <td>$0.02</td>
+                </tr>
+                <tr>
                     <td><strong>Total per letter</strong></td>
-                    <td>~91,000</td>
-                    <td>~8,600</td>
-                    <td><strong>~$0.27</strong></td>
+                    <td>~100,000</td>
+                    <td>~9,100</td>
+                    <td><strong>~$0.30</strong></td>
                 </tr>
             </table>
             <p style="font-size: 0.9rem; color: #666; margin-top: 0.5rem;">
                 <em>Based on Azure OpenAI GPT-4.1 standard pricing: $2.20/1M input, $8.80/1M output</em><br>
-                <em>**Runs separately via structured_data_ingestion.py. Will be integrated into featurization.py.</em>
+                <em>**Now integrated into featurization_inference.py - runs automatically for every case.</em>
             </p>
 
             <h3>Data Flow (Per Letter)</h3>
@@ -1162,7 +1193,7 @@
             </table>
             <p style="font-size: 0.85rem; color: #666; margin-top: 0.5rem;">
                 <em>*POC only: Step 2 extracts account_id from denial text. In production, workqueue provides this directly - step is skipped.</em><br>
-                <em>**Runs separately via structured_data_ingestion.py. Will be integrated into featurization.py.</em>
+                <em>**Now integrated into featurization_inference.py - runs automatically for every case.</em>
             </p>
 
             <div class="callout success">
@@ -1246,13 +1277,13 @@
             <h3>Investment Profile</h3>
             <ul>
                 <li><strong>Infrastructure cost:</strong> $0 incremental (uses existing Databricks/Azure)</li>
-                <li><strong>LLM cost:</strong> ~$0.27 per letter (Azure OpenAI GPT-4.1, with structured data)</li>
+                <li><strong>LLM cost:</strong> ~$0.30 per letter (Azure OpenAI GPT-4.1, with structured data + conflict detection)</li>
                 <li><strong>One-time setup:</strong> &lt;$1 (gold letter + Propel ingestion)</li>
                 <li><strong>Monthly cost examples:</strong>
                     <ul>
-                        <li>100 appeals/month: ~$27</li>
-                        <li>500 appeals/month: ~$135</li>
-                        <li>1,000 appeals/month: ~$270</li>
+                        <li>100 appeals/month: ~$30</li>
+                        <li>500 appeals/month: ~$150</li>
+                        <li>1,000 appeals/month: ~$300</li>
                     </ul>
                 </li>
                 <li><strong>Development:</strong> Internal Financial Data Science team</li>
@@ -1271,7 +1302,11 @@
                     <th>Status</th>
                 </tr>
                 <tr>
-                    <td>Featurization pipeline</td>
+                    <td>Knowledge base (featurization_train.py)</td>
+                    <td><span class="status-badge ready">Complete</span></td>
+                </tr>
+                <tr>
+                    <td>Per-case data prep (featurization_inference.py)</td>
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
                 <tr>
@@ -1295,6 +1330,14 @@
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
                 <tr>
+                    <td>Structured data integration</td>
+                    <td><span class="status-badge ready">Complete</span></td>
+                </tr>
+                <tr>
+                    <td>Conflict detection</td>
+                    <td><span class="status-badge ready">Complete</span></td>
+                </tr>
+                <tr>
                     <td>Note extraction with timestamps</td>
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
@@ -1303,7 +1346,11 @@
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
                 <tr>
-                    <td>DOCX export</td>
+                    <td>Appeal strength assessment</td>
+                    <td><span class="status-badge ready">Complete</span></td>
+                </tr>
+                <tr>
+                    <td>DOCX export (with conflicts appendix)</td>
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
                 <tr>

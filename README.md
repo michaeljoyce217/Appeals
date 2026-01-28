@@ -26,32 +26,33 @@ When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this sy
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                         KNOWLEDGE LAYER (One-Time Setup)                    │
+│                   KNOWLEDGE LAYER (featurization_train.py - run once)       │
 │  ┌──────────────┐    ┌──────────────┐                                      │
 │  │    Propel    │    │    Gold      │                                      │
 │  │   Criteria   │    │   Letters    │                                      │
 │  │  (propel_    │    │  (gold_      │                                      │
 │  │   data)      │    │   letters)   │                                      │
 │  └──────────────┘    └──────────────┘                                      │
-│         ▲                   ▲                                               │
-│         └─────────┬─────────┘                                               │
-│                   │                                                         │
-│          featurization.py (run once)                                        │
-│                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                    PER-LETTER PROCESSING (inference.py)                     │
+│             DATA PREP LAYER (featurization_inference.py - per case)         │
 │                                                                             │
-│  [Denial PDF] ──► inference.py ──► [DOCX Appeal Letter]                    │
+│  [Denial PDF] ──► Parse & Extract Info ──► Query Clinical Notes            │
+│                                       ──► Query Structured Data             │
+│                                       ──► Detect Conflicts                  │
 │                                                                             │
-│  Step 1: Parse PDF (Document Intelligence)                                  │
-│  Step 2: Vector search for best gold letter (uses denial text only)        │
-│  Step 3: Extract denial info (LLM: account ID, payor, DRGs)                │
-│  Step 4: Query Clarity for this account's clinical notes                   │
-│  Step 5: Extract clinical data from long notes (LLM)                       │
-│  Step 6: Generate appeal letter (LLM)                                      │
-│  Step 7: Export to DOCX                                                    │
+│  Outputs: denial_text, denial_info, clinical_notes, structured_summary,    │
+│           conflicts (notes vs structured data)                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                   GENERATION LAYER (inference.py - per case)                │
+│                                                                             │
+│  Step 1: Vector search for best gold letter                                 │
+│  Step 2: Generate appeal (LLM: gold letter + notes + structured data)       │
+│  Step 3: Assess strength (LLM: Propel criteria, evidence quality)           │
+│  Step 4: Export to DOCX (includes conflicts appendix if any)                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 
@@ -63,16 +64,19 @@ When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this sy
 | Feature | Description |
 |---------|-------------|
 | **Single-Letter Processing** | One denial at a time - no batch processing, no memory issues |
+| **Evidence Hierarchy** | Physician notes (primary) + structured data (supporting) for comprehensive evidence |
+| **Conflict Detection** | Flags discrepancies between notes and structured data for CDI review |
 | **Vector Search** | Embeddings-based similarity matching finds the most relevant past denial |
 | **Gold Letter Learning** | Uses winning appeals as templates - proven arguments get reused |
 | **Default Template Fallback** | When no good match found, uses default template as structural guide |
 | **Propel Integration** | LLM extracts key criteria from Propel PDFs into concise summaries |
 | **Comprehensive Clinical Notes** | Pulls 14 note types from Clarity (see below) |
+| **Structured Data Summary** | Labs, vitals, meds queried from Clarity and summarized for sepsis relevance |
 | **Smart Note Extraction** | Long notes (>8k chars) auto-extracted with timestamps via LLM |
 | **SOFA Score Extraction** | Prioritizes organ dysfunction data: lactate, MAP, creatinine, platelets, bilirubin, GCS, PaO2/FiO2 |
 | **Conservative DRG Extraction** | Only extracts DRGs if explicitly stated - no hallucination of plausible codes |
 | **Markdown Bold Parsing** | `**text**` in LLM output renders as bold in DOCX |
-| **Simple Output** | Appeals saved to `outputs/` as `{account_id}_{patient}_appeal.docx` |
+| **Conflicts Appendix** | DOCX includes appendix listing any notes vs structured data conflicts |
 | **Human-in-the-Loop** | All letters output as DOCX for CDI review before sending |
 | **Production-Ready** | Supports Epic workqueue integration via KNOWN_ACCOUNT_ID |
 
@@ -104,10 +108,10 @@ The system pulls **14 sepsis-relevant note types** for comprehensive clinical ev
 ```
 SEPSIS/
 ├── data/
-│   ├── featurization.py              # ONE-TIME: Knowledge base ingestion
-│   └── structured_data_ingestion.py  # SEPARATE: Labs/vitals/meds ingestion (future integration)
+│   ├── featurization_train.py        # ONE-TIME: Knowledge base ingestion (gold letters + Propel)
+│   └── featurization_inference.py    # PER-CASE: Data prep (denial + notes + structured data)
 ├── model/
-│   └── inference.py          # MAIN: Single-letter processing
+│   └── inference.py                  # GENERATION: Vector search, write, assess, export
 ├── utils/
 │   ├── gold_standard_appeals_sepsis_only/    # Current gold letters + default template
 │   ├── gold_standard_appeals_sepsis_multiple/ # Future use
@@ -115,7 +119,7 @@ SEPSIS/
 │   ├── propel_data/            # Clinical criteria definitions (PDFs)
 │   └── outputs/                # Generated appeal letters (DOCX)
 ├── docs/
-│   └── appeal-assistant-guide.html  # Executive overview
+│   └── rebuttal-engine-overview.html  # Executive overview
 ├── compare_denials.py        # Utility: check for duplicate denials
 ├── test_queries.sql          # Validation queries for Unity Catalog
 └── README.md
@@ -128,19 +132,7 @@ SEPSIS/
 | `dev.fin_ds.fudgesicle_gold_letters` | Past winning appeals with denial embeddings |
 | `dev.fin_ds.fudgesicle_propel_data` | Official clinical criteria (sepsis definition) |
 
-Note: No intermediate inference tables needed - single-letter processing queries Clarity directly.
-
-### Structured Data Tables (Future - via structured_data_ingestion.py)
-
-| Table | Contents |
-|-------|----------|
-| `fudgesicle_labs` | Lab results with timestamps (lactate, CBC, BMP, LFTs, cultures) |
-| `fudgesicle_vitals` | Vital signs (temp, HR, RR, BP, MAP, SpO2, GCS, UO) |
-| `fudgesicle_meds` | Medication administrations (antibiotics, vasopressors, fluids) |
-| `fudgesicle_procedures` | Procedures (lines, intubation, dialysis) |
-| `fudgesicle_icd10` | ICD-10 diagnosis codes |
-
-*Structured data ingestion runs separately via structured_data_ingestion.py. Will be integrated into featurization.py.*
+Note: Structured data (labs, vitals, meds) is queried directly from Clarity at inference time - no intermediate tables needed.
 
 ## Quick Start (Databricks)
 
@@ -154,7 +146,7 @@ PROPEL_DATA_PATH = "/Workspace/Repos/your-user/fudgesicle/utils/propel_data"
 
 ### 2. Ingest Gold Standard Letters (one-time)
 
-In `featurization.py`:
+In `featurization_train.py`:
 ```python
 RUN_GOLD_INGESTION = True
 ```
@@ -162,7 +154,7 @@ Run the notebook. This extracts appeals and denials from gold letter PDFs, gener
 
 ### 3. Ingest Propel Definitions (one-time)
 
-In `featurization.py`:
+In `featurization_train.py`:
 ```python
 RUN_PROPEL_INGESTION = True
 ```
@@ -180,16 +172,17 @@ KNOWN_ACCOUNT_ID = None  # or "12345678"
 ```
 
 Run the notebook. For this denial:
-- Parses PDF and finds best matching gold letter via vector search
-- Extracts denial info (account ID, payor, DRGs) via LLM
-- Queries Clarity for clinical notes (14 note types)
-- Includes Propel sepsis definition
-- Generates appeal using clinical notes
-- Exports DOCX to `outputs/` folder
+- Parses PDF and extracts denial info (account ID, payor, DRGs) via `featurization_inference.py`
+- Queries Clarity for clinical notes (14 note types) and structured data (labs, vitals, meds)
+- Detects conflicts between physician notes and structured data
+- Finds best matching gold letter via vector search
+- Generates appeal using gold letter + notes + structured data
+- Assesses appeal strength against Propel criteria
+- Exports DOCX to `outputs/` folder (includes conflicts appendix if any)
 
 ## Configuration
 
-### featurization.py (One-Time Setup)
+### featurization_train.py (One-Time Setup)
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -207,6 +200,14 @@ Run the notebook. For this denial:
 | `NOTE_EXTRACTION_THRESHOLD` | 8000 | Char limit before LLM extraction |
 | `EXPORT_TO_DOCX` | True | Export letters as Word documents |
 
+### featurization_inference.py (Called by inference.py)
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `NOTE_EXTRACTION_THRESHOLD` | 8000 | Char limit before LLM extraction |
+| `RUN_STRUCTURED_DATA` | True | Query and extract structured data |
+| `RUN_CONFLICT_DETECTION` | True | Compare notes vs structured data |
+
 ## Technology Stack
 
 | Component | Technology |
@@ -223,28 +224,27 @@ Run the notebook. For this denial:
 
 Based on Azure OpenAI GPT-4.1 standard pricing ($2.20/1M input, $8.80/1M output):
 
-### Per Appeal Letter (~$0.27 with structured data)
+### Per Appeal Letter (~$0.30)
 
 | Step | Input Tokens | Output Tokens | Cost |
 |------|-------------|---------------|------|
 | Denial info extraction | ~4,000 | ~100 | $0.01 |
 | Note extraction (4 calls avg) | ~12,000 | ~3,200 | $0.05 |
-| Structured data extraction* | ~8,000 | ~1,500 | $0.03 |
+| Structured data extraction | ~8,000 | ~1,500 | $0.03 |
+| Conflict detection | ~6,000 | ~500 | $0.02 |
 | Appeal letter generation | ~55,000 | ~3,000 | $0.15 |
-| Strength assessment | ~12,000 | ~800 | $0.03 |
-| **Total** | ~91,000 | ~8,600 | **~$0.27** |
-
-*Runs separately via structured_data_ingestion.py. Will be integrated into featurization.py.
+| Strength assessment | ~15,000 | ~800 | $0.04 |
+| **Total** | ~100,000 | ~9,100 | **~$0.30** |
 
 ### Monthly Projections
 
 | Volume | LLM Cost |
 |--------|----------|
-| 100 appeals/month | ~$27 |
-| 500 appeals/month | ~$135 |
-| 1,000 appeals/month | ~$270 |
+| 100 appeals/month | ~$30 |
+| 500 appeals/month | ~$150 |
+| 1,000 appeals/month | ~$300 |
 
-**One-time setup (featurization.py):** <$1 for gold letter + Propel ingestion
+**One-time setup (featurization_train.py):** <$1 for gold letter + Propel ingestion
 
 **Infrastructure:** $0 incremental (uses existing Databricks/Azure)
 
@@ -255,7 +255,7 @@ The architecture supports any denial type. To add a new condition (e.g., pneumon
 1. **Add clinical criteria**: Place `propel_pneumonia.pdf` in `utils/propel_data/`
 2. **Add gold letters**: Add winning appeals to appropriate `gold_standard_appeals_*/` folder
 3. **Update scope filter**: Modify `SCOPE_FILTER` logic in inference.py
-4. **Run ingestion**: Re-run featurization.py with ingestion flags enabled
+4. **Run ingestion**: Re-run featurization_train.py with ingestion flags enabled
 
 No architectural changes needed - the same pipeline handles any denial type.
 

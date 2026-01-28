@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sepsis Appeal Engine - How It Works</title>
+    <style>
+        :root {
+            --mercy-blue: #003366;
+            --mercy-light: #4a90c2;
+            --accent: #e85a30;
+            --success: #28a745;
+            --light-bg: #f8f9fa;
+            --dark-text: #2c3e50;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--light-bg);
+            color: var(--dark-text);
+            line-height: 1.7;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--mercy-blue), var(--mercy-light));
+            color: white;
+            padding: 2rem;
+            border-radius: 12px;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        header p {
+            opacity: 0.9;
+        }
+
+        section {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        h2 {
+            color: var(--mercy-blue);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 3px solid var(--accent);
+        }
+
+        h3 {
+            color: var(--mercy-light);
+            margin: 1.5rem 0 0.75rem;
+        }
+
+        p {
+            margin-bottom: 1rem;
+        }
+
+        ul {
+            margin: 1rem 0 1rem 1.5rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        .flow-diagram {
+            background: var(--dark-text);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            white-space: pre;
+            line-height: 1.5;
+            margin: 1.5rem 0;
+        }
+
+        .input-box {
+            background: #e3f2fd;
+            border-left: 4px solid var(--mercy-light);
+            padding: 1rem 1.5rem;
+            margin: 1rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .input-box h4 {
+            color: var(--mercy-blue);
+            margin-bottom: 0.5rem;
+        }
+
+        .output-box {
+            background: #e8f5e9;
+            border-left: 4px solid var(--success);
+            padding: 1rem 1.5rem;
+            margin: 1rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .output-box h4 {
+            color: var(--success);
+            margin-bottom: 0.5rem;
+        }
+
+        .highlight {
+            background: #fff3e0;
+            border-left: 4px solid var(--accent);
+            padding: 1rem 1.5rem;
+            margin: 1rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .highlight h4 {
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        th {
+            background: var(--mercy-blue);
+            color: white;
+            padding: 0.75rem 1rem;
+            text-align: left;
+        }
+
+        td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid #ddd;
+        }
+
+        tr:nth-child(even) {
+            background: var(--light-bg);
+        }
+
+        .step {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            margin: 1rem 0;
+            padding: 1rem;
+            background: var(--light-bg);
+            border-radius: 8px;
+        }
+
+        .step-number {
+            background: var(--accent);
+            color: white;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .step-content h4 {
+            color: var(--mercy-blue);
+            margin-bottom: 0.25rem;
+        }
+
+        .step-content p {
+            margin: 0;
+            color: #555;
+        }
+
+        footer {
+            text-align: center;
+            padding: 1rem;
+            color: #666;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Sepsis Appeal Engine</h1>
+        <p>AI-Assisted Appeal Letter Generation</p>
+    </header>
+
+    <section>
+        <h2>What It Does</h2>
+        <p>
+            When we receive a denial letter for a sepsis case, this system helps draft an appeal letter
+            by automatically pulling together all the relevant information and generating a first draft.
+        </p>
+        <p>
+            <strong>You still review and approve every letter.</strong> The AI does the research and
+            drafting; you provide the judgment and final approval.
+        </p>
+    </section>
+
+    <section>
+        <h2>The Simple Flow</h2>
+        <div class="flow-diagram">
+   Denial Letter (PDF)
+         |
+         v
+   +------------------+
+   |   AI System      |
+   |                  |
+   |  Pulls together: |
+   |  - Past winners  |
+   |  - Clinical notes|
+   |  - Lab values    |
+   |  - Vitals        |
+   |  - Medications   |
+   |  - Diagnoses     |
+   +------------------+
+         |
+         v
+   Draft Appeal Letter (Word doc)
+         |
+         v
+   CDI Review & Approval
+         |
+         v
+   Final Letter to Payor</div>
+    </section>
+
+    <section>
+        <h2>What Goes In</h2>
+
+        <div class="input-box">
+            <h4>1. The Denial Letter</h4>
+            <p>The PDF denial letter from the payor. The system reads this to understand what arguments we need to counter.</p>
+        </div>
+
+        <div class="input-box">
+            <h4>2. Past Winning Appeals (Gold Letters)</h4>
+            <p>A library of our past successful appeals. The system finds the most similar past case and uses that winning letter as a template - proven arguments get reused.</p>
+        </div>
+
+        <div class="input-box">
+            <h4>3. Clinical Notes from Epic</h4>
+            <p>The system pulls 14 types of clinical notes for this patient:</p>
+            <ul>
+                <li>Progress Notes, H&P, Discharge Summary</li>
+                <li>ED Notes, ED Triage, ED Provider Notes</li>
+                <li>Consults, Nursing Notes</li>
+                <li>And more...</li>
+            </ul>
+        </div>
+
+        <div class="input-box">
+            <h4>4. Structured Data from Epic</h4>
+            <p>Objective clinical measurements:</p>
+            <ul>
+                <li><strong>Labs:</strong> Lactate, WBC, procalcitonin, cultures, creatinine, bilirubin, platelets</li>
+                <li><strong>Vitals:</strong> Temperature, MAP, heart rate, respiratory rate, SpO2, GCS</li>
+                <li><strong>Medications:</strong> Antibiotics, vasopressors, fluids</li>
+                <li><strong>Diagnoses:</strong> Documented diagnosis descriptions (e.g., "Severe sepsis with septic shock due to MRSA")</li>
+            </ul>
+        </div>
+
+        <div class="input-box">
+            <h4>5. Propel Criteria</h4>
+            <p>The official clinical definition of sepsis that we use to justify the diagnosis.</p>
+        </div>
+    </section>
+
+    <section>
+        <h2>What Comes Out</h2>
+
+        <div class="output-box">
+            <h4>A Word Document with:</h4>
+            <ul>
+                <li><strong>Strength Assessment</strong> - A score (1-10) rating how strong the appeal is, with notes on what evidence is present vs. missing</li>
+                <li><strong>The Appeal Letter</strong> - A complete draft addressing the denial arguments with clinical evidence</li>
+                <li><strong>Conflicts Flag</strong> - If the physician notes say one thing but the labs/vitals show something different, this is flagged for your review</li>
+            </ul>
+        </div>
+    </section>
+
+    <section>
+        <h2>How It Builds the Letter</h2>
+
+        <div class="step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+                <h4>Read the Denial</h4>
+                <p>Extracts the payor's arguments and identifies what we need to counter.</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+                <h4>Find a Similar Past Winner</h4>
+                <p>Searches our library of past successful appeals to find the most similar case. Uses that winning letter as a template.</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+                <h4>Gather Clinical Evidence</h4>
+                <p>Pulls all relevant notes, labs, vitals, meds, and diagnoses from Epic for this patient.</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-number">4</div>
+            <div class="step-content">
+                <h4>Check for Conflicts</h4>
+                <p>Compares what the physician notes say vs. what the structured data shows. Flags any discrepancies for your review.</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-number">5</div>
+            <div class="step-content">
+                <h4>Generate the Appeal</h4>
+                <p>Writes the letter using the winning template, clinical evidence, and Propel criteria to build the argument.</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-number">6</div>
+            <div class="step-content">
+                <h4>Assess Strength</h4>
+                <p>Evaluates the letter and flags what evidence is strong vs. what might be missing.</p>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Evidence Hierarchy</h2>
+        <p>The system treats different types of evidence differently:</p>
+
+        <table>
+            <tr>
+                <th>Evidence Type</th>
+                <th>Role</th>
+                <th>Example</th>
+            </tr>
+            <tr>
+                <td><strong>Physician Notes</strong></td>
+                <td>Primary evidence - clinical judgment</td>
+                <td>"Patient developed septic shock requiring vasopressors"</td>
+            </tr>
+            <tr>
+                <td><strong>Structured Data</strong></td>
+                <td>Supporting evidence - objective measurements</td>
+                <td>MAP 58, Lactate 4.2, Norepinephrine started 14:30</td>
+            </tr>
+            <tr>
+                <td><strong>Diagnoses</strong></td>
+                <td>Documented conditions to quote</td>
+                <td>"Severe sepsis with septic shock due to E. coli"</td>
+            </tr>
+        </table>
+    </section>
+
+    <section>
+        <h2>What You Need to Review</h2>
+
+        <div class="highlight">
+            <h4>Every Letter Needs Your Approval</h4>
+            <p>The AI generates a draft, but you:</p>
+            <ul>
+                <li>Verify the clinical facts are accurate</li>
+                <li>Check that the arguments make sense for this case</li>
+                <li>Review any flagged conflicts</li>
+                <li>Edit as needed before sending</li>
+            </ul>
+        </div>
+    </section>
+
+    <section>
+        <h2>Key Benefits</h2>
+        <ul>
+            <li><strong>Faster drafting</strong> - Research and initial draft done automatically</li>
+            <li><strong>Consistent quality</strong> - Uses proven arguments from past winners</li>
+            <li><strong>Complete evidence</strong> - Pulls from 14 note types plus labs, vitals, meds</li>
+            <li><strong>Conflict detection</strong> - Flags discrepancies between notes and data</li>
+            <li><strong>You stay in control</strong> - Every letter reviewed before sending</li>
+        </ul>
+    </section>
+
+    <footer>
+        <p>Sepsis Appeal Engine | Financial Data Science | Mercy Hospital</p>
+    </footer>
+</body>
+</html>

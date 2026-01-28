@@ -1,11 +1,11 @@
-# data/featurization.py
-# Sepsis Appeal Engine - Knowledge Base Ingestion
+# data/featurization_train.py
+# Sepsis Appeal Engine - Knowledge Base Setup (One-Time)
 #
 # ONE-TIME SETUP: Ingests gold standard letters and Propel definitions
-# into Unity Catalog tables for use by inference.py
+# into Unity Catalog tables. Run once, or when adding new gold letters.
 #
-# This file does NOT process denial letters - that happens in inference.py
-# on a per-letter basis (production-like workflow).
+# This is the "training" featurization - builds the knowledge base.
+# For per-case data prep, see featurization_inference.py
 #
 # Run on Databricks Runtime 15.4 LTS ML
 

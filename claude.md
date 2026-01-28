@@ -1,6 +1,6 @@
 # Sepsis Appeal Engine - Master Prompt
 
-**Last Updated:** 2026-01-25
+**Last Updated:** 2026-01-27
 **Repo:** https://github.com/michaeljoyce217/SEPSIS
 
 ---
@@ -9,7 +9,7 @@
 
 **Goal:** Automated generation of DRG appeal letters for sepsis-related insurance denials (DRG 870/871/872).
 
-**Architecture:** Single-letter processing pipeline using Azure OpenAI GPT-4.1
+**Architecture:** Three-file pipeline using Azure OpenAI GPT-4.1
 
 **Platform:** Databricks on Azure with Unity Catalog
 
@@ -22,10 +22,10 @@
 ```
 SEPSIS/
 ├── data/
-│   ├── featurization.py              # ONE-TIME: Knowledge base ingestion (gold letters + propel)
-│   └── structured_data_ingestion.py  # PER-ACCOUNT: Labs, vitals, meds, procedures, ICD-10
+│   ├── featurization_train.py        # ONE-TIME: Knowledge base ingestion (gold letters + propel)
+│   └── featurization_inference.py    # PER-CASE: Data prep (denial + notes + structured data)
 ├── model/
-│   └── inference.py                  # MAIN: Single-letter end-to-end processing
+│   └── inference.py                  # GENERATION: Vector search, write, assess, export
 ├── utils/
 │   ├── gold_standard_appeals_sepsis_only/    # Current gold letters + default template
 │   ├── gold_standard_appeals_sepsis_multiple/ # Future use
@@ -45,7 +45,7 @@ SEPSIS/
 
 ## Pipeline Architecture
 
-### One-Time Setup: featurization.py
+### One-Time Setup: featurization_train.py
 Run once to populate knowledge base tables:
 
 | Step | Technology | Function |
@@ -54,65 +54,56 @@ Run once to populate knowledge base tables:
 | Denial Embedding | text-embedding-ada-002 | Generate 1536-dim vectors for similarity search |
 | Propel Extraction | GPT-4.1 | Extract key clinical criteria from Propel PDFs |
 
-### Per-Account Data: structured_data_ingestion.py
-Queries Clarity structured data and writes to intermediate tables:
-
-| Table | Contents |
-|-------|----------|
-| `fudgesicle_labs` | Lab results with timestamps (lactate, CBC, BMP, LFTs, cultures) |
-| `fudgesicle_vitals` | Vital signs (temp, HR, RR, BP, MAP, SpO2, GCS, UO) |
-| `fudgesicle_meds` | Medication administrations (antibiotics, vasopressors, fluids) |
-| `fudgesicle_procedures` | Procedures (lines, intubation, dialysis) |
-| `fudgesicle_icd10` | ICD-10 diagnosis codes |
-
-Data is merged into chronological timeline, then LLM extracts sepsis-relevant information.
-
-### Per-Letter Processing: inference.py
-Run for each denial letter:
+### Per-Case Data Prep: featurization_inference.py
+All data gathering for a single case:
 
 | Step | Technology | Function |
 |------|------------|----------|
-| 1. PDF Parse | Azure AI Document Intelligence | OCR extraction from denial PDF |
+| 1. Parse Denial PDF | Azure AI Document Intelligence | OCR extraction from denial PDF |
+| 2. Extract Denial Info | GPT-4.1 | Extract: account_id, payor, DRGs, is_sepsis |
+| 3. Query Clinical Notes | Spark SQL | Get 14 note types from Epic Clarity |
+| 4. Extract Clinical Notes | GPT-4.1 | Extract SOFA components + clinical data with timestamps |
+| 5. Query Structured Data | Spark SQL | Get labs, vitals, meds, diagnoses from Clarity |
+| 6. Extract Structured Summary | GPT-4.1 | Summarize sepsis-relevant labs/vitals/meds |
+| 7. Detect Conflicts | GPT-4.1 | Compare notes vs structured data for discrepancies |
+
+### Generation: inference.py
+Run for each denial letter (imports functions from featurization_inference.py):
+
+| Step | Technology | Function |
+|------|------------|----------|
+| 1. Data Prep | featurization_inference.py | Run steps 1-7 above |
 | 2. Vector Search | Cosine Similarity | Find best-matching gold letter (uses denial text only) |
-| 3. Info Extract | GPT-4.1 | Extract: account_id, payor, DRGs, is_sepsis (conservative - no hallucination) |
-| 4. Clarity Query | Spark SQL (optimized) | Get 14 clinical note types for this account |
-| 5. Note Extraction | GPT-4.1 | Extract SOFA components + clinical data with timestamps |
-| 6. Letter Generation | GPT-4.1 | Generate appeal using gold letter + clinical evidence |
-| 6.5. Strength Assessment | GPT-4.1 | Evaluate letter against Propel criteria, argument structure, evidence quality |
-| 7. Export | python-docx | Output DOCX with assessment section + markdown bold parsing |
+| 3. Letter Generation | GPT-4.1 | Generate appeal using gold letter + notes + structured data |
+| 4. Strength Assessment | GPT-4.1 | Evaluate letter against Propel criteria, argument structure, evidence quality |
+| 5. Export | python-docx | Output DOCX with assessment + conflicts appendix |
 
 ---
 
 ## Unity Catalog Tables
 
-### Knowledge Base (populated by featurization.py)
+### Knowledge Base (populated by featurization_train.py)
 
 | Table | Purpose |
 |-------|---------|
 | `dev.fin_ds.fudgesicle_gold_letters` | Past winning appeals with denial embeddings |
 | `dev.fin_ds.fudgesicle_propel_data` | Official clinical criteria (definition_summary for prompts) |
 
-### Structured Data (populated by structured_data_ingestion.py - standalone script)
-
-| Table | Purpose |
-|-------|---------|
-| `dev.fin_ds.fudgesicle_labs` | Lab results with timestamps |
-| `dev.fin_ds.fudgesicle_vitals` | Vital signs with timestamps |
-| `dev.fin_ds.fudgesicle_meds` | Medication administrations |
-| `dev.fin_ds.fudgesicle_procedures` | Procedures performed |
-| `dev.fin_ds.fudgesicle_icd10` | ICD-10 diagnosis codes |
-| `dev.fin_ds.fudgesicle_structured_timeline` | Merged chronological timeline |
-
-Note: Structured data ingestion is currently a standalone script, not yet integrated with inference.py.
+Note: Structured data is queried directly from Clarity at inference time - no intermediate tables needed.
 
 ---
 
 ## Key Features
 
+### Evidence Hierarchy
+- **Primary Evidence:** Physician notes (clinical interpretation with medical judgment)
+- **Supporting Evidence:** Structured data (objective lab values, vitals, medications)
+- **Conflict Detection:** When structured data contradicts physician notes, flagged for CDI review
+
 ### 14 Clinical Note Types (from Epic Clarity)
 Progress Notes, Consults, H&P, Discharge Summary, ED Notes, Initial Assessments, ED Triage Notes, ED Provider Notes, Addendum Note, Hospital Course, Subjective & Objective, Assessment & Plan Note, Nursing Note, Code Documentation
 
-### SOFA Score Extraction (NEW)
+### SOFA Score Extraction
 Note extraction prioritizes organ dysfunction data for quantifying sepsis severity:
 - **Respiration:** PaO2/FiO2 ratio, oxygen requirements
 - **Coagulation:** Platelet count
@@ -122,19 +113,31 @@ Note extraction prioritizes organ dysfunction data for quantifying sepsis severi
 - **Renal:** Creatinine, urine output
 - **Plus:** Lactate trends, infection evidence, antibiotic timing
 
+### Structured Data Summary
+Labs, vitals, and medications are queried from Clarity and summarized by LLM for sepsis-relevant data:
+- **Labs:** Lactate trends, WBC, procalcitonin, cultures, organ function (creatinine, bilirubin, platelets)
+- **Vitals:** Temperature, MAP, heart rate, respiratory rate, SpO2, GCS
+- **Meds:** Antibiotic timing (SEP-1 compliance), vasopressor initiation, fluid resuscitation
+
 ### Smart Note Extraction
 Notes >8,000 chars are automatically extracted via LLM to pull relevant clinical data WITH timestamps (e.g., "03/15/2024 08:00: Lactate 4.2, MAP 63").
 
-### Appeal Strength Assessment (NEW)
+### Conflict Detection
+Compares physician notes vs structured data to identify discrepancies:
+- Note says "MAP maintained >65" but vitals show MAP <65
+- Note says "lactate normalized" but labs show lactate still elevated
+- Conflicts appear in DOCX appendix for CDI review
+
+### Appeal Strength Assessment
 After letter generation, an LLM evaluates the appeal and produces:
 - **Overall score** (1-10) with LOW/MODERATE/HIGH rating
 - **Summary** (2-3 sentences explaining the score)
 - **Detailed breakdown** scoring three dimensions:
   - Propel Criteria Coverage (from: Propel definitions)
   - Argument Structure (from: denial letter, gold template)
-  - Evidence Quality (from: clinical notes; structured data pending)
+  - Evidence Quality (from: clinical notes AND structured data)
 
-Each finding is marked ✓ present, △ could strengthen, or ✗ missing. The "missing" items in Evidence Quality flag specific data points from clinical notes that weren't cited in the letter.
+Each finding is marked ✓ present, △ could strengthen, or ✗ missing. The "missing" items in Evidence Quality flag specific data points that weren't cited in the letter.
 
 Assessment appears in DOCX before the letter body for CDI reviewer reference.
 
@@ -163,7 +166,7 @@ Appeal letters are saved to `utils/outputs/` with filename format: `{account_id}
 
 ## Configuration
 
-### featurization.py Flags
+### featurization_train.py Flags
 | Flag | Default | Description |
 |------|---------|-------------|
 | `RUN_GOLD_INGESTION` | False | Process gold standard letter PDFs |
@@ -179,27 +182,36 @@ Appeal letters are saved to `utils/outputs/` with filename format: `{account_id}
 | `NOTE_EXTRACTION_THRESHOLD` | 8000 | Char limit before LLM extraction |
 | `EXPORT_TO_DOCX` | True | Export as Word documents |
 
+### featurization_inference.py (called by inference.py)
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `NOTE_EXTRACTION_THRESHOLD` | 8000 | Char limit before LLM extraction |
+| `RUN_STRUCTURED_DATA` | True | Query and extract structured data |
+| `RUN_CONFLICT_DETECTION` | True | Compare notes vs structured data |
+
 ---
 
 ## Cost Estimates
 
 Based on Azure OpenAI GPT-4.1 standard pricing ($2.20/1M input, $8.80/1M output):
 
-### Per Appeal Letter (~$0.23)
+### Per Appeal Letter (~$0.30)
 | Step | Input Tokens | Output Tokens | Cost |
 |------|-------------|---------------|------|
 | Denial info extraction | ~4,000 | ~100 | $0.01 |
 | Note extraction (4 calls avg) | ~12,000 | ~3,200 | $0.05 |
-| Appeal letter generation | ~50,000 | ~3,000 | $0.14 |
-| Strength assessment | ~12,000 | ~800 | $0.03 |
-| **Total** | ~78,000 | ~7,100 | **~$0.23** |
+| Structured data extraction | ~8,000 | ~1,500 | $0.03 |
+| Conflict detection | ~6,000 | ~500 | $0.02 |
+| Appeal letter generation | ~55,000 | ~3,000 | $0.15 |
+| Strength assessment | ~15,000 | ~800 | $0.04 |
+| **Total** | ~100,000 | ~9,100 | **~$0.30** |
 
 ### Monthly Projections
 | Volume | LLM Cost |
 |--------|----------|
-| 100 appeals/month | ~$23 |
-| 500 appeals/month | ~$115 |
-| 1,000 appeals/month | ~$230 |
+| 100 appeals/month | ~$30 |
+| 500 appeals/month | ~$150 |
+| 1,000 appeals/month | ~$300 |
 
 **One-time setup:** <$1 for gold letter + Propel ingestion
 
@@ -221,7 +233,7 @@ Based on Azure OpenAI GPT-4.1 standard pricing ($2.20/1M input, $8.80/1M output)
    dbutils.library.restartPython()
    ```
 
-2. **One-time setup** - Run `featurization.py` with flags enabled:
+2. **One-time setup** - Run `featurization_train.py` with flags enabled:
    ```python
    RUN_GOLD_INGESTION = True   # First run
    RUN_PROPEL_INGESTION = True # First run
@@ -231,8 +243,9 @@ Based on Azure OpenAI GPT-4.1 standard pricing ($2.20/1M input, $8.80/1M output)
    ```python
    DENIAL_PDF_PATH = "/path/to/denial.pdf"
    ```
+   This will automatically run `featurization_inference.py` to gather all case data.
 
-4. **Review output** in `utils/outputs/`
+4. **Review output** in `utils/outputs/` - includes assessment section and conflicts appendix (if any)
 
 ---
 

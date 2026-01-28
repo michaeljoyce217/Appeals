@@ -1,53 +1,34 @@
 # model/inference.py
-# Sepsis Appeal Engine - Single Letter Processing
+# Sepsis Appeal Engine - Appeal Letter Generation
 #
-# END-TO-END PIPELINE FOR ONE DENIAL LETTER:
-# 1. Parse denial PDF → Extract text via OCR
-# 2. Vector search → Find best matching gold letter (uses denial text only)
-# 3. Extract denial info → LLM extracts account ID, payor, DRGs, sepsis flag
-# 4. Query Clarity → Get clinical notes for this account
-# 5. Extract clinical data → LLM extracts from long notes (>8k chars)
-# 6. Generate appeal → Use gold letter as template, clinical notes as evidence
-# 6.5. Assess strength → LLM evaluates letter against Propel criteria, argument structure, evidence quality
-# 7. Output → DOCX file with assessment section for CDI review
+# GENERATION PIPELINE (assumes data has been prepared):
+# 1. Load knowledge base (gold letters, Propel definitions)
+# 2. Vector search → Find best matching gold letter
+# 3. Generate appeal letter → Using prepared clinical data
+# 4. Assess strength → Evaluate against criteria
+# 5. Export to DOCX → With conflicts appendix if applicable
 #
-# PRODUCTION-LIKE WORKFLOW:
-# This mirrors how production will work - one denial at a time from Epic workqueue.
-# No batch processing, no intermediate tables, no driver memory issues.
+# DATA PREPARATION: Run featurization_inference.py first, or this script
+# will call those functions automatically.
 #
 # Run on Databricks Runtime 15.4 LTS ML
 
 # =============================================================================
-# CELL 1: Install Dependencies (run this cell FIRST, then restart)
-# =============================================================================
-# IMPORTANT: Run this cell by itself, then run the rest of the notebook.
-#
-# Uncomment and run ONCE per cluster session:
-# %pip install azure-ai-documentintelligence==1.0.2 openai python-docx
-# dbutils.library.restartPython()
-#
-# After restart completes, run Cell 2 onwards (leave this cell commented)
-
-# =============================================================================
-# CELL 2: Imports and Configuration
+# CELL 1: Configuration
 # =============================================================================
 import os
 import math
-from datetime import datetime, date
+import json
+import re
+from datetime import datetime
 from pyspark.sql import SparkSession
 
 spark = SparkSession.builder.getOrCreate()
 
 # -----------------------------------------------------------------------------
-# INPUT CONFIGURATION - Set the denial PDF to process
+# INPUT CONFIGURATION
 # -----------------------------------------------------------------------------
-# Path to the denial letter PDF to process
-# In production, this would come from Epic workqueue
 DENIAL_PDF_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/sample_denial_letters/example_denial.pdf"
-
-# If account ID is known (production), set it here. Otherwise LLM will extract from PDF.
-# In production: Epic workqueue provides this
-# In POC: Set to None to extract from PDF
 KNOWN_ACCOUNT_ID = None  # e.g., "12345678" or None to extract
 
 # -----------------------------------------------------------------------------
@@ -56,26 +37,23 @@ KNOWN_ACCOUNT_ID = None  # e.g., "12345678" or None to extract
 SCOPE_FILTER = "sepsis"
 SEPSIS_DRG_CODES = ["870", "871", "872"]
 MATCH_SCORE_THRESHOLD = 0.7
-NOTE_EXTRACTION_THRESHOLD = 8000  # Chars - notes longer than this get extracted
-EMBEDDING_MODEL = "text-embedding-ada-002"
 
-# Default template path (fallback when no gold letter matches)
+# Default template path
 DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals_sepsis_only/default_sepsis_appeal_template.docx"
 
 # Output configuration
 EXPORT_TO_DOCX = True
 DOCX_OUTPUT_BASE = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/outputs"
 
-# =============================================================================
-# CELL 3: Environment Setup
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Environment Setup
+# -----------------------------------------------------------------------------
 trgt_cat = os.environ.get('trgt_cat', 'dev')
 if trgt_cat == 'dev':
     spark.sql('USE CATALOG prod;')
 else:
     spark.sql(f'USE CATALOG {trgt_cat};')
 
-# Table names (for knowledge base - gold letters and propel definitions)
 GOLD_LETTERS_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_gold_letters"
 PROPEL_DATA_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_propel_data"
 
@@ -83,618 +61,49 @@ print(f"Catalog: {trgt_cat}")
 print(f"Denial PDF: {DENIAL_PDF_PATH}")
 
 # =============================================================================
-# CELL 4: Azure Credentials and Clients
+# CELL 2: Azure Credentials and Client
 # =============================================================================
 from openai import AzureOpenAI
-from azure.ai.documentintelligence import DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
-from azure.core.credentials import AzureKeyCredential
 
-# Load credentials
 AZURE_OPENAI_KEY = dbutils.secrets.get(scope='idp_etl', key='az-openai-key1')
 AZURE_OPENAI_ENDPOINT = dbutils.secrets.get(scope='idp_etl', key='az-openai-base')
-AZURE_DOC_INTEL_KEY = dbutils.secrets.get(scope='idp_etl', key='az-aidcmntintel-key1')
-AZURE_DOC_INTEL_ENDPOINT = dbutils.secrets.get(scope='idp_etl', key='az-aidcmntintel-endpoint')
 
-# Initialize clients
 openai_client = AzureOpenAI(
     api_key=AZURE_OPENAI_KEY,
     azure_endpoint=AZURE_OPENAI_ENDPOINT,
     api_version="2024-10-21"
 )
 
-doc_intel_client = DocumentIntelligenceClient(
-    endpoint=AZURE_DOC_INTEL_ENDPOINT,
-    credential=AzureKeyCredential(AZURE_DOC_INTEL_KEY)
+print("Azure OpenAI client initialized")
+
+# =============================================================================
+# CELL 3: Import Data Preparation Functions
+# =============================================================================
+# Import functions from featurization_inference.py
+import sys
+sys.path.insert(0, '/Workspace/Repos/mijo8881@mercy.net/fudgesicle/data')
+
+from featurization_inference import (
+    extract_text_from_pdf,
+    generate_embedding,
+    extract_denial_info_llm,
+    query_clarity_for_account,
+    extract_notes_for_case,
+    create_target_encounter_view,
+    query_labs,
+    query_vitals,
+    query_meds,
+    query_diagnoses,
+    create_merged_timeline,
+    extract_structured_data_summary,
+    detect_conflicts,
+    NOTE_EXTRACTION_THRESHOLD
 )
 
-print("Azure clients initialized")
+print("Data preparation functions imported from featurization_inference.py")
 
 # =============================================================================
-# CELL 5: Core Functions - PDF Parsing and Denial Extraction
-# =============================================================================
-
-def extract_text_from_pdf(file_path):
-    """Extract text from PDF using Document Intelligence."""
-    with open(file_path, 'rb') as f:
-        document_bytes = f.read()
-
-    poller = doc_intel_client.begin_analyze_document(
-        model_id="prebuilt-layout",
-        body=AnalyzeDocumentRequest(bytes_source=document_bytes),
-    )
-    result = poller.result()
-
-    pages_text = []
-    for page in result.pages:
-        page_lines = [line.content for line in page.lines]
-        pages_text.append("\n".join(page_lines))
-
-    return pages_text
-
-
-def generate_embedding(text):
-    """Generate embedding vector for text."""
-    if len(text) > 20000:
-        text = text[:20000]
-
-    response = openai_client.embeddings.create(
-        model=EMBEDDING_MODEL,
-        input=text
-    )
-    return response.data[0].embedding
-
-
-DENIAL_PARSER_PROMPT = '''Extract key information from this denial letter.
-
-# Denial Letter Text
-{denial_text}
-
-# Instructions
-Find:
-1. HOSPITAL ACCOUNT ID - starts with "H" followed by digits (e.g., H1234567890)
-2. INSURANCE PAYOR - the company that sent this denial
-3. ORIGINAL DRG - the DRG code the hospital billed (e.g., 871). ONLY if explicitly stated as a number.
-4. PROPOSED DRG - the DRG the payor wants to change it to (e.g., 872). ONLY if explicitly stated as a number.
-5. IS SEPSIS RELATED - does this denial involve sepsis, severe sepsis, or septic shock?
-
-CRITICAL: For DRG codes, return NONE unless you see an actual 3-digit DRG number explicitly written in the letter.
-Do NOT guess or infer DRG codes. If the letter just says "adjusted" or "changed" without specific numbers, return NONE.
-
-Return ONLY these lines (no JSON):
-ACCOUNT_ID: [H-prefixed number or NONE]
-PAYOR: [insurance company name]
-ORIGINAL_DRG: [3-digit code ONLY if explicitly stated, otherwise NONE]
-PROPOSED_DRG: [3-digit code ONLY if explicitly stated, otherwise NONE]
-IS_SEPSIS: [YES or NO]'''
-
-
-def transform_hsp_account_id(raw_id):
-    """Transform HSP_ACCOUNT_ID from denial letter format to Clarity format."""
-    if not raw_id:
-        return None
-
-    cleaned = str(raw_id).strip()
-
-    if not cleaned.upper().startswith('H'):
-        print(f"  Skipping non-H account ID: {cleaned}")
-        return None
-
-    cleaned = cleaned[1:]  # Remove H prefix
-
-    if len(cleaned) > 2:
-        cleaned = cleaned[:-2]  # Remove last 2 digits
-    else:
-        return None
-
-    if cleaned and cleaned.isdigit():
-        return cleaned
-
-    return None
-
-
-def extract_denial_info_llm(text):
-    """Use LLM to extract denial info from text."""
-    try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[
-                {"role": "system", "content": "Extract information accurately. Return only the requested format."},
-                {"role": "user", "content": DENIAL_PARSER_PROMPT.format(denial_text=text[:15000])}
-            ],
-            temperature=0,
-            max_tokens=200
-        )
-
-        raw = response.choices[0].message.content.strip()
-
-        result = {
-            "hsp_account_id": None,
-            "payor": "Unknown",
-            "original_drg": None,
-            "proposed_drg": None,
-            "is_sepsis": False
-        }
-
-        for line in raw.split("\n"):
-            line = line.strip()
-            if ":" not in line:
-                continue
-            key, value = line.split(":", 1)
-            key = key.strip().upper()
-            value = value.strip()
-
-            if key == "ACCOUNT_ID":
-                if value and value.upper() != "NONE":
-                    result["hsp_account_id"] = transform_hsp_account_id(value)
-            elif key == "PAYOR":
-                result["payor"] = value if value else "Unknown"
-            elif key == "ORIGINAL_DRG":
-                if value and value.upper() != "NONE":
-                    result["original_drg"] = value
-            elif key == "PROPOSED_DRG":
-                if value and value.upper() != "NONE":
-                    result["proposed_drg"] = value
-            elif key == "IS_SEPSIS":
-                result["is_sepsis"] = value.upper() == "YES"
-
-        return result
-
-    except Exception as e:
-        print(f"  LLM extraction error: {e}")
-        return {
-            "hsp_account_id": None,
-            "payor": "Unknown",
-            "original_drg": None,
-            "proposed_drg": None,
-            "is_sepsis": False
-        }
-
-
-print("Core functions loaded")
-
-# =============================================================================
-# CELL 6: Clarity Query Function (Single Account) - OPTIMIZED
-# =============================================================================
-
-# Note type mapping for pivoting
-NOTE_TYPE_MAP = {
-    'H&P': ('hp_note_id', 'hp_note_csn_id', 'hp_note_text'),
-    'Discharge Summary': ('discharge_summary_note_id', 'discharge_note_csn_id', 'discharge_summary_text'),
-    'Progress Notes': ('progress_note_id', 'progress_note_csn_id', 'progress_note_text'),
-    'Consults': ('consult_note_id', 'consult_note_csn_id', 'consult_note_text'),
-    'ED Notes': ('ed_notes_id', 'ed_notes_csn_id', 'ed_notes_text'),
-    'Initial Assessments': ('initial_assessment_id', 'initial_assessment_csn_id', 'initial_assessment_text'),
-    'ED Triage Notes': ('ed_triage_id', 'ed_triage_csn_id', 'ed_triage_text'),
-    'ED Provider Notes': ('ed_provider_note_id', 'ed_provider_note_csn_id', 'ed_provider_note_text'),
-    'Addendum Note': ('addendum_note_id', 'addendum_note_csn_id', 'addendum_note_text'),
-    'Hospital Course': ('hospital_course_id', 'hospital_course_csn_id', 'hospital_course_text'),
-    'Subjective & Objective': ('subjective_objective_id', 'subjective_objective_csn_id', 'subjective_objective_text'),
-    'Assessment & Plan Note': ('assessment_plan_id', 'assessment_plan_csn_id', 'assessment_plan_text'),
-    'Nursing Note': ('nursing_note_id', 'nursing_note_csn_id', 'nursing_note_text'),
-    'Code Documentation': ('code_documentation_id', 'code_documentation_csn_id', 'code_documentation_text'),
-}
-
-def query_clarity_for_account(account_id):
-    """
-    Query Clarity for clinical notes for a single account.
-    Uses two simple queries instead of one complex query for better performance.
-    Returns dict with patient info and 14 clinical note types.
-    """
-    print(f"  Querying Clarity for account {account_id}...")
-
-    # Query 1: Get patient info (fast, simple query)
-    patient_query = f"""
-    SELECT ha.hsp_account_id, patient.pat_id, patient.pat_mrn_id,
-           CONCAT(patient.pat_first_name, ' ', patient.pat_last_name) AS formatted_name,
-           DATE_FORMAT(patient.birth_date, 'MM/dd/yyyy') AS formatted_birthdate,
-           'Mercy Hospital' AS facility_name,
-           DATEDIFF(ha.disch_date_time, DATE(ha.adm_date_time)) AS number_of_midnights,
-           CONCAT(DATE_FORMAT(ha.adm_date_time, 'MM/dd/yyyy'), '-', DATE_FORMAT(ha.disch_date_time, 'MM/dd/yyyy')) AS formatted_date_of_service
-    FROM clarity_cur.hsp_account_enh ha
-    INNER JOIN clarity_cur.patient_enh patient ON ha.pat_id = patient.pat_id
-    WHERE ha.hsp_account_id = '{account_id}'
-    """
-
-    patient_rows = spark.sql(patient_query).collect()
-    if not patient_rows:
-        print(f"  WARNING: No patient found in Clarity for account {account_id}")
-        return None
-
-    clinical_data = patient_rows[0].asDict()
-    print(f"  Found patient: {clinical_data.get('formatted_name', 'Unknown')}")
-
-    # Query 2: Get all notes for this account (simpler query, pivot in Python)
-    notes_query = f"""
-    SELECT
-        nte.ip_note_type,
-        nte.note_id,
-        nte.note_csn_id,
-        nte.contact_date,
-        nte.ent_inst_local_dttm,
-        CONCAT_WS('\\n', SORT_ARRAY(COLLECT_LIST(STRUCT(nte.line, nte.note_text))).note_text) AS note_text
-    FROM clarity_cur.pat_enc_hsp_har_enh peh
-    INNER JOIN clarity_cur.hno_note_text_enh nte USING(pat_enc_csn_id)
-    WHERE peh.hsp_account_id = '{account_id}'
-      AND nte.ip_note_type IN (
-        'Progress Notes', 'Consults', 'H&P', 'Discharge Summary',
-        'ED Notes', 'Initial Assessments', 'ED Triage Notes', 'ED Provider Notes',
-        'Addendum Note', 'Hospital Course', 'Subjective & Objective',
-        'Assessment & Plan Note', 'Nursing Note', 'Code Documentation'
-      )
-    GROUP BY nte.ip_note_type, nte.note_id, nte.note_csn_id, nte.contact_date, nte.ent_inst_local_dttm
-    """
-
-    print(f"  Fetching clinical notes...")
-    notes_rows = spark.sql(notes_query).collect()
-    print(f"  Retrieved {len(notes_rows)} notes")
-
-    # Pivot in Python: get most recent note per type
-    notes_by_type = {}
-    for row in notes_rows:
-        note_type = row['ip_note_type']
-        # Use (contact_date, entry_datetime) as sort key for most recent
-        sort_key = (row['contact_date'], row['ent_inst_local_dttm'])
-
-        if note_type not in notes_by_type or sort_key > notes_by_type[note_type][0]:
-            notes_by_type[note_type] = (sort_key, row)
-
-    # Map notes to expected column names
-    for note_type, (id_col, csn_col, text_col) in NOTE_TYPE_MAP.items():
-        if note_type in notes_by_type:
-            _, row = notes_by_type[note_type]
-            clinical_data[id_col] = str(row['note_id']) if row['note_id'] else 'no id available'
-            clinical_data[csn_col] = str(row['note_csn_id']) if row['note_csn_id'] else 'no id available'
-            clinical_data[text_col] = row['note_text'] if row['note_text'] else 'No Note Available'
-        else:
-            clinical_data[id_col] = 'no id available'
-            clinical_data[csn_col] = 'no id available'
-            clinical_data[text_col] = 'No Note Available'
-
-    return clinical_data
-
-
-print("Clarity query function loaded")
-
-# =============================================================================
-# CELL 7: Clinical Note Extraction (for long notes)
-# =============================================================================
-
-NOTE_EXTRACTION_PROMPT = '''Extract clinically relevant information from this {note_type}.
-
-CRITICAL: For EVERY piece of information you extract, include the associated date/time if available.
-Format timestamps consistently as: MM/DD/YYYY HH:MM or MM/DD/YYYY if time not available.
-
-# Clinical Note
-{note_text}
-
-# What to Extract (with timestamps)
-
-## SOFA Score Components (PRIORITY - extract ALL available)
-- Respiration: PaO2/FiO2 ratio, SpO2/FiO2, oxygen requirements, ventilator settings
-- Coagulation: Platelet count
-- Liver: Bilirubin (total)
-- Cardiovascular: MAP, hypotension, vasopressor use (drug, dose)
-- CNS: GCS (Glasgow Coma Scale), mental status changes
-- Renal: Creatinine, urine output
-
-## Other Sepsis Markers
-- Lactate levels (CRITICAL - include all values with times)
-- WBC count, bands
-- Temperature (fever, hypothermia)
-- Heart rate, respiratory rate
-- Blood culture results, infection source
-- Antibiotic administration times
-
-## Clinical Events
-- Fluid resuscitation (volume, timing)
-- ICU admission/transfer
-- Physician assessments mentioning sepsis, SIRS, infection
-
-# Output Format
-Return a structured summary with timestamps. Example:
-SOFA COMPONENTS:
-- 03/15/2024 06:30: Creatinine 2.1, Platelets 95, Bilirubin 1.8
-- 03/15/2024 08:00: MAP 63, on norepinephrine 0.1 mcg/kg/min
-- 03/15/2024 08:00: GCS 14, PaO2/FiO2 280
-
-LACTATE TREND:
-- 03/15/2024 06:30: Lactate 4.2
-- 03/15/2024 10:00: Lactate 2.8 (after fluids)
-
-VITAL SIGNS:
-- 03/15/2024 08:00: Temp 38.9°C, HR 112, BP 85/52
-
-INFECTION EVIDENCE:
-- 03/15/2024: Blood cultures positive for E. coli
-- 03/15/2024 07:00: Started on Zosyn
-
-Only include sections that have relevant data. Be thorough but concise.'''
-
-
-def extract_clinical_data(note_text, note_type):
-    """Extract clinically relevant data with timestamps from a long clinical note."""
-    if not note_text or note_text == "No Note Available":
-        return note_text
-
-    if len(note_text) < NOTE_EXTRACTION_THRESHOLD:
-        return note_text
-
-    try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[
-                {"role": "system", "content": "You are a clinical data extraction specialist. Extract relevant medical information with precise timestamps."},
-                {"role": "user", "content": NOTE_EXTRACTION_PROMPT.format(note_type=note_type, note_text=note_text)}
-            ],
-            temperature=0.1,
-            max_tokens=3000
-        )
-
-        extracted = response.choices[0].message.content.strip()
-        print(f"    Extracted {note_type}: {len(note_text)} chars → {len(extracted)} chars")
-        return extracted
-
-    except Exception as e:
-        print(f"    Warning: Extraction failed for {note_type}: {e}")
-        return note_text[:NOTE_EXTRACTION_THRESHOLD] + "\n\n[Note truncated]"
-
-
-def extract_notes_for_case(clinical_data):
-    """Extract clinical data from all long notes for a case."""
-    note_types = {
-        "discharge_summary": ("discharge_summary_text", "Discharge Summary"),
-        "hp_note": ("hp_note_text", "History & Physical"),
-        "progress_note": ("progress_note_text", "Progress Notes"),
-        "consult_note": ("consult_note_text", "Consult Notes"),
-        "ed_notes": ("ed_notes_text", "ED Notes"),
-        "initial_assessment": ("initial_assessment_text", "Initial Assessments"),
-        "ed_triage": ("ed_triage_text", "ED Triage Notes"),
-        "ed_provider_note": ("ed_provider_note_text", "ED Provider Notes"),
-        "addendum_note": ("addendum_note_text", "Addendum Note"),
-        "hospital_course": ("hospital_course_text", "Hospital Course"),
-        "subjective_objective": ("subjective_objective_text", "Subjective & Objective"),
-        "assessment_plan": ("assessment_plan_text", "Assessment & Plan Note"),
-        "nursing_note": ("nursing_note_text", "Nursing Note"),
-        "code_documentation": ("code_documentation_text", "Code Documentation"),
-    }
-
-    extracted_notes = {}
-    notes_to_extract = []
-
-    for key, (col_name, display_name) in note_types.items():
-        note_text = clinical_data.get(col_name, "No Note Available")
-        if note_text and note_text != "No Note Available":
-            if len(note_text) >= NOTE_EXTRACTION_THRESHOLD:
-                notes_to_extract.append((key, col_name, display_name, note_text))
-            else:
-                extracted_notes[key] = note_text
-        else:
-            extracted_notes[key] = "Not available"
-
-    if notes_to_extract:
-        print(f"  Extracting from {len(notes_to_extract)} long notes...")
-        for key, col_name, display_name, note_text in notes_to_extract:
-            extracted_notes[key] = extract_clinical_data(note_text, display_name)
-
-    return extracted_notes
-
-
-print("Note extraction functions loaded")
-
-# =============================================================================
-# CELL 7.5: Appeal Strength Assessment
-# =============================================================================
-import json
-
-ASSESSMENT_PROMPT = '''You are evaluating the strength of a sepsis DRG appeal letter.
-
-═══ PROPEL SEPSIS CRITERIA (source: official definitions) ═══
-{propel_definition}
-
-═══ DENIAL LETTER (source: payor's denial) ═══
-{denial_text}
-
-═══ GOLD LETTER TEMPLATE USED (source: past winning appeal) ═══
-{gold_letter_text}
-
-═══ AVAILABLE CLINICAL EVIDENCE ═══
-
-── From Clinical Notes (source: Epic Clarity notes) ──
-{extracted_clinical_data}
-
-═══ GENERATED APPEAL LETTER (being evaluated) ═══
-{generated_letter}
-
-═══ EVALUATION INSTRUCTIONS ═══
-Evaluate this appeal letter and provide:
-
-1. OVERALL SCORE (1-10) and RATING (LOW for 1-4, MODERATE for 5-7, HIGH for 8-10)
-
-2. SUMMARY (2-3 sentences explaining the score)
-
-3. DETAILED BREAKDOWN with scores and specific findings:
-
-   a) PROPEL CRITERIA COVERAGE - Does the letter document:
-      - Suspected or confirmed infection
-      - Organ dysfunction (per SOFA criteria)
-      - Clinical response to treatment
-      Note what's present, what could be stronger, what's missing
-
-   b) ARGUMENT STRUCTURE - Does the letter:
-      - Directly address the payor's stated denial reason
-      - Follow the logical structure of the gold letter template
-      - Provide clear clinical reasoning
-
-   c) EVIDENCE QUALITY - Split into two parts:
-
-      From Clinical Notes:
-      - Are specific values cited (not just "elevated lactate")?
-      - Are timestamps present for key events?
-      - List any relevant evidence in the notes NOT cited in the letter
-
-      From Structured Data:
-      - Evaluate when available, otherwise note "pending integration"
-
-Return ONLY valid JSON in this exact format:
-{{
-  "overall_score": <1-10>,
-  "overall_rating": "<LOW|MODERATE|HIGH>",
-  "summary": "<2-3 sentence summary>",
-  "propel_criteria": {{
-    "score": <1-10>,
-    "source": "Propel definitions",
-    "findings": [
-      {{"status": "<present|could_strengthen|missing>", "item": "<description>"}}
-    ]
-  }},
-  "argument_structure": {{
-    "score": <1-10>,
-    "source": "denial letter, gold template",
-    "findings": [
-      {{"status": "<present|could_strengthen|missing>", "item": "<description>"}}
-    ]
-  }},
-  "evidence_quality": {{
-    "clinical_notes": {{
-      "score": <1-10>,
-      "source": "Epic Clarity notes",
-      "findings": [
-        {{"status": "<present|could_strengthen|missing>", "item": "<description>"}}
-      ]
-    }}
-  }}
-}}'''
-
-
-def assess_appeal_strength(generated_letter, propel_definition, denial_text,
-                           extracted_notes, gold_letter_text):
-    """
-    Assess the strength of a generated appeal letter.
-    Returns assessment dict or None if assessment fails.
-    """
-    print("  Running strength assessment...")
-
-    # Format extracted notes for the prompt
-    notes_summary = []
-    for note_type, content in extracted_notes.items():
-        if content and content != "Not available":
-            # Truncate very long notes for the assessment
-            truncated = content[:2000] + "..." if len(content) > 2000 else content
-            notes_summary.append(f"## {note_type}\n{truncated}")
-    extracted_clinical_data = "\n\n".join(notes_summary) if notes_summary else "No clinical notes available"
-
-    try:
-        response = openai_client.chat.completions.create(
-            model="gpt-4.1",
-            messages=[
-                {"role": "system", "content": "You are a clinical appeal quality assessor. Return only valid JSON."},
-                {"role": "user", "content": ASSESSMENT_PROMPT.format(
-                    propel_definition=propel_definition or "Propel criteria not available for this condition",
-                    denial_text=denial_text[:5000] if denial_text else "Denial text not available",
-                    gold_letter_text=gold_letter_text[:3000] if gold_letter_text else "No gold letter template used",
-                    extracted_clinical_data=extracted_clinical_data,
-                    generated_letter=generated_letter
-                )}
-            ],
-            temperature=0,
-            max_tokens=2000
-        )
-
-        raw_response = response.choices[0].message.content.strip()
-
-        # Parse JSON - handle potential markdown code blocks
-        if raw_response.startswith("```"):
-            # Remove markdown code block
-            raw_response = raw_response.split("```")[1]
-            if raw_response.startswith("json"):
-                raw_response = raw_response[4:]
-            raw_response = raw_response.strip()
-
-        assessment = json.loads(raw_response)
-
-        # Validate and clamp score
-        if "overall_score" in assessment:
-            assessment["overall_score"] = max(1, min(10, int(assessment["overall_score"])))
-
-        print(f"  Assessment complete: {assessment.get('overall_score', '?')}/10 - {assessment.get('overall_rating', '?')}")
-        return assessment
-
-    except json.JSONDecodeError as e:
-        print(f"  Warning: Assessment JSON parse error: {e}")
-        return None
-    except Exception as e:
-        print(f"  Warning: Assessment failed: {e}")
-        return None
-
-
-def format_assessment_for_docx(assessment):
-    """Format assessment dict into text for DOCX output."""
-    if not assessment:
-        return "Assessment unavailable: LLM assessment failed\n\nPlease review letter manually before sending."
-
-    status_symbols = {
-        "present": "✓",
-        "could_strengthen": "△",
-        "missing": "✗"
-    }
-
-    lines = []
-
-    # Overall score
-    lines.append(f"Overall Strength: {assessment.get('overall_score', '?')}/10 - {assessment.get('overall_rating', '?')}")
-    lines.append("")
-
-    # Summary
-    lines.append(f"Summary: {assessment.get('summary', 'No summary available')}")
-    lines.append("")
-
-    # Detailed Breakdown
-    lines.append("Detailed Breakdown:")
-    lines.append("┌" + "─" * 57 + "┐")
-
-    # Propel Criteria
-    propel = assessment.get("propel_criteria", {})
-    lines.append(f"│ PROPEL CRITERIA COVERAGE (from: {propel.get('source', 'Propel definitions')})".ljust(58) + "│")
-    lines.append(f"│ Score: {propel.get('score', '?')}/10".ljust(58) + "│")
-    for finding in propel.get("findings", []):
-        symbol = status_symbols.get(finding.get("status", ""), "?")
-        item = finding.get("item", "")[:50]
-        lines.append(f"│ {symbol} {item}".ljust(58) + "│")
-
-    lines.append("├" + "─" * 57 + "┤")
-
-    # Argument Structure
-    argument = assessment.get("argument_structure", {})
-    lines.append(f"│ ARGUMENT STRUCTURE (from: {argument.get('source', 'denial letter, gold template')})".ljust(58) + "│")
-    lines.append(f"│ Score: {argument.get('score', '?')}/10".ljust(58) + "│")
-    for finding in argument.get("findings", []):
-        symbol = status_symbols.get(finding.get("status", ""), "?")
-        item = finding.get("item", "")[:50]
-        lines.append(f"│ {symbol} {item}".ljust(58) + "│")
-
-    lines.append("├" + "─" * 57 + "┤")
-
-    # Evidence Quality
-    evidence = assessment.get("evidence_quality", {})
-    clinical = evidence.get("clinical_notes", {})
-    lines.append(f"│ EVIDENCE QUALITY".ljust(58) + "│")
-    lines.append(f"│".ljust(58) + "│")
-    lines.append(f"│ From Clinical Notes (from: {clinical.get('source', 'Epic Clarity notes')}): {clinical.get('score', '?')}/10".ljust(58) + "│")
-    for finding in clinical.get("findings", []):
-        symbol = status_symbols.get(finding.get("status", ""), "?")
-        item = finding.get("item", "")[:48]
-        lines.append(f"│ {symbol} {item}".ljust(58) + "│")
-
-    lines.append("└" + "─" * 57 + "┘")
-
-    return "\n".join(lines)
-
-
-print("Assessment functions loaded")
-
-# =============================================================================
-# CELL 8: Load Knowledge Base (Gold Letters + Propel)
+# CELL 4: Load Knowledge Base
 # =============================================================================
 print("\n" + "="*60)
 print("LOADING KNOWLEDGE BASE")
@@ -766,14 +175,49 @@ except Exception as e:
     print(f"  Warning: Could not load propel definitions: {e}")
 
 # =============================================================================
-# CELL 9: Writer Prompt
+# CELL 5: Vector Search Function
+# =============================================================================
+
+def find_best_gold_letter(denial_embedding):
+    """Find the best matching gold letter using cosine similarity."""
+    if not gold_letters_cache or not denial_embedding:
+        return None, 0.0
+
+    best_score = 0.0
+    best_match = None
+
+    for letter in gold_letters_cache:
+        if letter["denial_embedding"]:
+            vec1 = denial_embedding
+            vec2 = letter["denial_embedding"]
+            dot_product = sum(a * b for a, b in zip(vec1, vec2))
+            norm1 = math.sqrt(sum(a * a for a in vec1))
+            norm2 = math.sqrt(sum(b * b for b in vec2))
+            if norm1 > 0 and norm2 > 0:
+                similarity = dot_product / (norm1 * norm2)
+                if similarity > best_score:
+                    best_score = similarity
+                    best_match = letter
+
+    if best_match and best_score >= MATCH_SCORE_THRESHOLD:
+        return best_match, best_score
+    elif default_template:
+        return default_template, 0.0
+    else:
+        return None, 0.0
+
+
+print("Vector search function loaded")
+
+# =============================================================================
+# CELL 6: Writer Prompt
 # =============================================================================
 WRITER_PROMPT = '''You are a clinical coding expert writing a DRG validation appeal letter for Mercy Hospital.
 
 # Original Denial Letter
 {denial_letter_text}
 
-# Clinical Notes (PRIMARY EVIDENCE)
+# Clinical Notes (PRIMARY EVIDENCE - from physician documentation)
 ## Discharge Summary
 {discharge_summary}
 
@@ -816,6 +260,9 @@ WRITER_PROMPT = '''You are a clinical coding expert writing a DRG validation app
 ## Code Documentation
 {code_documentation}
 
+# Structured Data Summary (SUPPORTING EVIDENCE - from labs, vitals, meds)
+{structured_data_summary}
+
 # Official Clinical Definition
 {clinical_definition_section}
 
@@ -836,129 +283,267 @@ Payor: {payor}
 {gold_letter_instructions}
 1. READ THE DENIAL LETTER - extract the payor address, reviewer name, claim numbers
 2. ADDRESS EACH DENIAL ARGUMENT - quote the payer, then refute
-3. CITE CLINICAL EVIDENCE from provider notes FIRST
+3. CITE CLINICAL EVIDENCE from provider notes FIRST, then structured data
 4. INCLUDE TIMESTAMPS with clinical values
 5. QUANTIFY ORGAN DYSFUNCTION using SOFA criteria when available:
    - Reference specific values: lactate, MAP, creatinine, platelets, bilirubin, GCS, PaO2/FiO2
    - Example: "Patient demonstrated cardiovascular dysfunction with MAP of 63 requiring vasopressor support"
-   - Example: "Renal dysfunction evidenced by creatinine of 2.1 (baseline 0.9)"
 6. Follow the Mercy Hospital template structure exactly
 
 Return ONLY the letter text.'''
 
 # =============================================================================
-# CELL 10: Main Processing - Single Letter
+# CELL 7: Assessment Functions
+# =============================================================================
+
+ASSESSMENT_PROMPT = '''You are evaluating the strength of a sepsis DRG appeal letter.
+
+═══ PROPEL SEPSIS CRITERIA ═══
+{propel_definition}
+
+═══ DENIAL LETTER ═══
+{denial_text}
+
+═══ GOLD LETTER TEMPLATE USED ═══
+{gold_letter_text}
+
+═══ AVAILABLE CLINICAL EVIDENCE ═══
+{extracted_clinical_data}
+
+═══ STRUCTURED DATA SUMMARY ═══
+{structured_summary}
+
+═══ GENERATED APPEAL LETTER ═══
+{generated_letter}
+
+═══ EVALUATION INSTRUCTIONS ═══
+Evaluate this appeal letter and provide:
+
+1. OVERALL SCORE (1-10) and RATING (LOW for 1-4, MODERATE for 5-7, HIGH for 8-10)
+2. SUMMARY (2-3 sentences)
+3. DETAILED BREAKDOWN with scores and specific findings
+
+Return ONLY valid JSON in this format:
+{{
+  "overall_score": <1-10>,
+  "overall_rating": "<LOW|MODERATE|HIGH>",
+  "summary": "<2-3 sentence summary>",
+  "propel_criteria": {{
+    "score": <1-10>,
+    "findings": [
+      {{"status": "<present|could_strengthen|missing>", "item": "<description>"}}
+    ]
+  }},
+  "argument_structure": {{
+    "score": <1-10>,
+    "findings": [
+      {{"status": "<present|could_strengthen|missing>", "item": "<description>"}}
+    ]
+  }},
+  "evidence_quality": {{
+    "clinical_notes": {{"score": <1-10>, "findings": [...]}},
+    "structured_data": {{"score": <1-10>, "findings": [...]}}
+  }}
+}}'''
+
+
+def assess_appeal_strength(generated_letter, propel_definition, denial_text,
+                           extracted_notes, gold_letter_text, structured_summary):
+    """Assess the strength of a generated appeal letter."""
+    print("  Running strength assessment...")
+
+    # Format extracted notes
+    notes_summary = []
+    for note_type, content in extracted_notes.items():
+        if content and content != "Not available":
+            truncated = content[:2000] + "..." if len(content) > 2000 else content
+            notes_summary.append(f"## {note_type}\n{truncated}")
+    extracted_clinical_data = "\n\n".join(notes_summary) if notes_summary else "No clinical notes available"
+
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4.1",
+            messages=[
+                {"role": "system", "content": "You are a clinical appeal quality assessor. Return only valid JSON."},
+                {"role": "user", "content": ASSESSMENT_PROMPT.format(
+                    propel_definition=propel_definition or "Propel criteria not available",
+                    denial_text=denial_text[:5000] if denial_text else "Denial text not available",
+                    gold_letter_text=gold_letter_text[:3000] if gold_letter_text else "No gold letter template used",
+                    extracted_clinical_data=extracted_clinical_data,
+                    structured_summary=structured_summary[:3000] if structured_summary else "No structured data",
+                    generated_letter=generated_letter
+                )}
+            ],
+            temperature=0,
+            max_tokens=2000
+        )
+
+        raw_response = response.choices[0].message.content.strip()
+
+        # Parse JSON
+        if raw_response.startswith("```"):
+            raw_response = raw_response.split("```")[1]
+            if raw_response.startswith("json"):
+                raw_response = raw_response[4:]
+            raw_response = raw_response.strip()
+
+        assessment = json.loads(raw_response)
+
+        if "overall_score" in assessment:
+            assessment["overall_score"] = max(1, min(10, int(assessment["overall_score"])))
+
+        print(f"  Assessment complete: {assessment.get('overall_score', '?')}/10 - {assessment.get('overall_rating', '?')}")
+        return assessment
+
+    except json.JSONDecodeError as e:
+        print(f"  Warning: Assessment JSON parse error: {e}")
+        return None
+    except Exception as e:
+        print(f"  Warning: Assessment failed: {e}")
+        return None
+
+
+def format_assessment_for_docx(assessment):
+    """Format assessment dict into text for DOCX output."""
+    if not assessment:
+        return "Assessment unavailable\n\nPlease review letter manually."
+
+    status_symbols = {"present": "✓", "could_strengthen": "△", "missing": "✗"}
+    lines = []
+
+    lines.append(f"Overall Strength: {assessment.get('overall_score', '?')}/10 - {assessment.get('overall_rating', '?')}")
+    lines.append("")
+    lines.append(f"Summary: {assessment.get('summary', 'No summary available')}")
+    lines.append("")
+    lines.append("Detailed Breakdown:")
+    lines.append("─" * 55)
+
+    # Propel Criteria
+    propel = assessment.get("propel_criteria", {})
+    lines.append(f"PROPEL CRITERIA: {propel.get('score', '?')}/10")
+    for finding in propel.get("findings", []):
+        symbol = status_symbols.get(finding.get("status", ""), "?")
+        lines.append(f"  {symbol} {finding.get('item', '')[:50]}")
+
+    # Argument Structure
+    argument = assessment.get("argument_structure", {})
+    lines.append(f"\nARGUMENT STRUCTURE: {argument.get('score', '?')}/10")
+    for finding in argument.get("findings", []):
+        symbol = status_symbols.get(finding.get("status", ""), "?")
+        lines.append(f"  {symbol} {finding.get('item', '')[:50]}")
+
+    # Evidence Quality
+    evidence = assessment.get("evidence_quality", {})
+    clinical = evidence.get("clinical_notes", {})
+    structured = evidence.get("structured_data", {})
+    lines.append(f"\nEVIDENCE - Clinical Notes: {clinical.get('score', '?')}/10")
+    for finding in clinical.get("findings", []):
+        symbol = status_symbols.get(finding.get("status", ""), "?")
+        lines.append(f"  {symbol} {finding.get('item', '')[:48]}")
+    lines.append(f"\nEVIDENCE - Structured Data: {structured.get('score', '?')}/10")
+    for finding in structured.get("findings", []):
+        symbol = status_symbols.get(finding.get("status", ""), "?")
+        lines.append(f"  {symbol} {finding.get('item', '')[:48]}")
+
+    lines.append("─" * 55)
+    return "\n".join(lines)
+
+
+print("Assessment functions loaded")
+
+# =============================================================================
+# CELL 8: Main Processing Pipeline
 # =============================================================================
 print("\n" + "="*60)
-print("PROCESSING DENIAL LETTER")
+print("INFERENCE - APPEAL LETTER GENERATION")
 print("="*60)
 
-# Check input file exists
 if not os.path.exists(DENIAL_PDF_PATH):
     print(f"\nERROR: Denial PDF not found: {DENIAL_PDF_PATH}")
-    print("Set DENIAL_PDF_PATH to a valid PDF file path.")
 else:
     print(f"\nInput: {os.path.basename(DENIAL_PDF_PATH)}")
 
-    # ---------------------------------------------------------------------
-    # STEP 1: Parse denial PDF
-    # ---------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # STEP 1: Parse denial PDF and extract info
+    # -------------------------------------------------------------------------
     print("\nStep 1: Parsing denial PDF...")
     pages = extract_text_from_pdf(DENIAL_PDF_PATH)
     denial_text = "\n\n".join(pages)
+    denial_embedding = generate_embedding(denial_text)
     print(f"  Extracted {len(pages)} pages, {len(denial_text)} chars")
 
-    # ---------------------------------------------------------------------
-    # STEP 2: Find similar gold standard letter (only needs denial text)
-    # ---------------------------------------------------------------------
-    print("\nStep 2: Finding similar gold standard letter...")
-    denial_embedding = generate_embedding(denial_text)
-    print(f"  Generated embedding ({len(denial_embedding)} dims)")
-
-    gold_letter = None
-    gold_letter_score = 0.0
-
-    if gold_letters_cache:
-        best_score = 0.0
-        best_match = None
-
-        for letter in gold_letters_cache:
-            if letter["denial_embedding"]:
-                vec1 = denial_embedding
-                vec2 = letter["denial_embedding"]
-                dot_product = sum(a * b for a, b in zip(vec1, vec2))
-                norm1 = math.sqrt(sum(a * a for a in vec1))
-                norm2 = math.sqrt(sum(b * b for b in vec2))
-                if norm1 > 0 and norm2 > 0:
-                    similarity = dot_product / (norm1 * norm2)
-                    if similarity > best_score:
-                        best_score = similarity
-                        best_match = letter
-
-        gold_letter_score = best_score
-
-        if best_match and best_score >= MATCH_SCORE_THRESHOLD:
-            gold_letter = best_match
-            print(f"  Found match: {gold_letter['source_file']} (score: {best_score:.3f})")
-        elif default_template:
-            gold_letter = default_template
-            gold_letter_score = 0.0
-            print(f"  No good match (best: {best_score:.3f}) - using default template")
-        else:
-            print(f"  No good match (best: {best_score:.3f})")
-
-    # ---------------------------------------------------------------------
-    # STEP 3: Extract denial info via LLM
-    # ---------------------------------------------------------------------
-    print("\nStep 3: Extracting denial info via LLM...")
     denial_info = extract_denial_info_llm(denial_text[:15000])
     print(f"  Account ID: {denial_info['hsp_account_id'] or 'NOT FOUND'}")
     print(f"  Payor: {denial_info['payor']}")
-    print(f"  DRG: {denial_info['original_drg']} → {denial_info['proposed_drg']}")
     print(f"  Sepsis: {denial_info['is_sepsis']}")
 
-    # Use known account ID if provided (production mode)
     account_id = KNOWN_ACCOUNT_ID or denial_info['hsp_account_id']
 
     if not account_id:
-        print("\nERROR: No account ID found. Set KNOWN_ACCOUNT_ID or ensure denial letter contains H-prefixed account number.")
+        print("\nERROR: No account ID found.")
     else:
-        # Check scope
-        if SCOPE_FILTER == "sepsis" and not denial_info['is_sepsis']:
-            print("\nWARNING: Denial not identified as sepsis-related. Proceeding anyway (set SCOPE_FILTER='all' to skip this check).")
+        # -------------------------------------------------------------------------
+        # STEP 2: Find best gold letter match
+        # -------------------------------------------------------------------------
+        print("\nStep 2: Finding best gold letter match...")
+        gold_letter, gold_letter_score = find_best_gold_letter(denial_embedding)
+        if gold_letter:
+            is_default = gold_letter.get("metadata", {}).get("is_default_template") == "true"
+            print(f"  Match: {gold_letter['source_file']} (score: {gold_letter_score:.3f})")
+        else:
+            print("  No match found")
 
-        # ---------------------------------------------------------------------
-        # STEP 4: Query Clarity for clinical notes
-        # ---------------------------------------------------------------------
-        print(f"\nStep 4: Querying Clarity for account {account_id}...")
+        # -------------------------------------------------------------------------
+        # STEP 3: Prepare clinical data
+        # -------------------------------------------------------------------------
+        print(f"\nStep 3: Preparing clinical data for account {account_id}...")
         clinical_data = query_clarity_for_account(account_id)
 
         if clinical_data:
-            # ---------------------------------------------------------------------
-            # STEP 5a: Extract clinical notes
-            # ---------------------------------------------------------------------
-            print("\nStep 5: Processing clinical notes...")
+            # Extract clinical notes
+            print("  Extracting clinical notes...")
             extracted_notes = extract_notes_for_case(clinical_data)
 
-            # ---------------------------------------------------------------------
-            # STEP 6: Generate appeal letter
-            # ---------------------------------------------------------------------
-            print("\nStep 6: Generating appeal letter...")
+            # Query and extract structured data
+            print("  Querying structured data...")
+            create_target_encounter_view(account_id)
+            query_labs(account_id)
+            query_vitals(account_id)
+            query_meds(account_id)
+            query_diagnoses(account_id)
+            create_merged_timeline(account_id)
+
+            print("  Extracting structured data summary...")
+            structured_summary = extract_structured_data_summary(account_id)
+
+            # Detect conflicts
+            print("  Detecting conflicts...")
+            notes_for_conflict = "\n\n".join([
+                f"## {key}\n{value[:2000]}"
+                for key, value in extracted_notes.items()
+                if value and value != "Not available"
+            ])
+            conflicts_result = detect_conflicts(notes_for_conflict, structured_summary)
+
+            # -------------------------------------------------------------------------
+            # STEP 4: Generate appeal letter
+            # -------------------------------------------------------------------------
+            print("\nStep 4: Generating appeal letter...")
 
             # Build gold letter section
             if gold_letter:
                 is_default = gold_letter.get("metadata", {}).get("is_default_template") == "true"
                 if is_default:
-                    gold_letter_section = f"## APPEAL TEMPLATE - USE AS STRUCTURAL GUIDE\n{gold_letter['appeal_text']}"
+                    gold_letter_section = f"## APPEAL TEMPLATE\n{gold_letter['appeal_text']}"
                     gold_letter_instructions = "**NOTE: Using default template as structural guide.**\n"
                 else:
                     gold_letter_section = f"## WINNING APPEAL (Score: {gold_letter_score:.3f})\nPayor: {gold_letter.get('payor')}\n\n{gold_letter['appeal_text']}"
-                    gold_letter_instructions = "**CRITICAL: Learn from this winning appeal - adapt to this patient.**\n"
+                    gold_letter_instructions = "**CRITICAL: Learn from this winning appeal.**\n"
             else:
                 gold_letter_section = "No template available."
                 gold_letter_instructions = ""
 
-            # Clinical definition section
+            # Clinical definition
             if denial_info['is_sepsis'] and "sepsis" in propel_definitions:
                 clinical_definition_section = f"## OFFICIAL SEPSIS DEFINITION\n{propel_definitions['sepsis']}"
             else:
@@ -981,6 +566,7 @@ else:
                 assessment_plan=extracted_notes.get("assessment_plan", "Not available"),
                 nursing_note=extracted_notes.get("nursing_note", "Not available"),
                 code_documentation=extracted_notes.get("code_documentation", "Not available"),
+                structured_data_summary=structured_summary,
                 clinical_definition_section=clinical_definition_section,
                 gold_letter_section=gold_letter_section,
                 gold_letter_instructions=gold_letter_instructions,
@@ -998,7 +584,7 @@ else:
             writer_response = openai_client.chat.completions.create(
                 model="gpt-4.1",
                 messages=[
-                    {"role": "system", "content": "You are a clinical coding expert writing DRG appeal letters. Prioritize evidence from provider notes."},
+                    {"role": "system", "content": "You are a clinical coding expert writing DRG appeal letters."},
                     {"role": "user", "content": writer_prompt}
                 ],
                 temperature=0.2,
@@ -1008,57 +594,44 @@ else:
             letter_text = writer_response.choices[0].message.content.strip()
             print(f"  Generated {len(letter_text)} character letter")
 
-            # ---------------------------------------------------------------------
-            # STEP 6.5: Assess appeal strength
-            # ---------------------------------------------------------------------
-            print("\nStep 6.5: Assessing appeal strength...")
+            # -------------------------------------------------------------------------
+            # STEP 5: Assess appeal strength
+            # -------------------------------------------------------------------------
+            print("\nStep 5: Assessing appeal strength...")
+            propel_def = propel_definitions.get("sepsis") if denial_info['is_sepsis'] else None
+            gold_text = gold_letter.get("appeal_text", "") if gold_letter else ""
 
-            # Get propel definition for assessment
-            propel_def_for_assessment = propel_definitions.get("sepsis", None) if denial_info['is_sepsis'] else None
-
-            # Get gold letter text for assessment
-            gold_letter_text_for_assessment = gold_letter.get("appeal_text", "") if gold_letter else ""
-
-            # Run assessment
             assessment = assess_appeal_strength(
-                generated_letter=letter_text,
-                propel_definition=propel_def_for_assessment,
-                denial_text=denial_text,
-                extracted_notes=extracted_notes,
-                gold_letter_text=gold_letter_text_for_assessment
+                letter_text, propel_def, denial_text,
+                extracted_notes, gold_text, structured_summary
             )
 
-            # ---------------------------------------------------------------------
-            # STEP 7: Export to DOCX
-            # ---------------------------------------------------------------------
+            # -------------------------------------------------------------------------
+            # STEP 6: Export to DOCX
+            # -------------------------------------------------------------------------
             if EXPORT_TO_DOCX:
-                print("\nStep 7: Exporting to DOCX...")
+                print("\nStep 6: Exporting to DOCX...")
                 from docx import Document
-                from docx.shared import Pt
-                import re
+                from docx.shared import Pt, RGBColor
 
                 def add_markdown_paragraph(doc, text):
-                    """Add a paragraph with markdown bold (**text**) converted to Word bold."""
+                    """Add paragraph with markdown bold converted to Word bold."""
                     p = doc.add_paragraph()
-                    # Split on **...** pattern, keeping the delimiters
                     parts = re.split(r'(\*\*.*?\*\*)', text)
                     for part in parts:
                         if part.startswith('**') and part.endswith('**'):
-                            # Bold text - strip the ** markers
                             run = p.add_run(part[2:-2])
                             run.bold = True
                         else:
                             p.add_run(part)
                     return p
 
-                # Ensure output folder exists
                 os.makedirs(DOCX_OUTPUT_BASE, exist_ok=True)
 
-                # Create document
                 doc = Document()
                 doc.add_heading('Appeal Letter', level=1)
 
-                # Metadata section
+                # Metadata
                 meta = doc.add_paragraph()
                 meta.add_run("Generated: ").bold = True
                 meta.add_run(f"{datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
@@ -1066,26 +639,40 @@ else:
                 meta.add_run(f"{clinical_data.get('formatted_name', 'Unknown')}\n")
                 meta.add_run("Payor: ").bold = True
                 meta.add_run(f"{denial_info['payor']}\n")
-                meta.add_run("DRG: ").bold = True
-                meta.add_run(f"{denial_info['original_drg']} → {denial_info['proposed_drg']}\n")
                 meta.add_run("Gold Letter: ").bold = True
                 meta.add_run(f"{gold_letter['source_file'] if gold_letter else 'None'} (score: {gold_letter_score:.3f})\n")
 
                 # Assessment section
                 doc.add_paragraph("═" * 55)
-                assessment_header = doc.add_paragraph()
-                assessment_header.add_run("APPEAL STRENGTH ASSESSMENT (Internal Review Only)").bold = True
+                header = doc.add_paragraph()
+                header.add_run("APPEAL STRENGTH ASSESSMENT (Internal Review Only)").bold = True
                 doc.add_paragraph("═" * 55)
 
-                assessment_text = format_assessment_for_docx(assessment)
-                for line in assessment_text.split('\n'):
+                for line in format_assessment_for_docx(assessment).split('\n'):
                     p = doc.add_paragraph(line)
                     p.paragraph_format.space_after = Pt(0)
 
                 doc.add_paragraph("═" * 55)
-                doc.add_paragraph()  # Blank line before letter
 
-                # Letter content - parse markdown bold
+                # Conflicts appendix (if any)
+                if conflicts_result.get('conflicts'):
+                    doc.add_paragraph()
+                    conflict_header = doc.add_paragraph()
+                    conflict_header.add_run("⚠️ CONFLICTS DETECTED - REQUIRES CDI REVIEW").bold = True
+                    doc.add_paragraph("─" * 55)
+                    for conflict in conflicts_result['conflicts']:
+                        p = doc.add_paragraph(conflict)
+                        p.paragraph_format.space_after = Pt(4)
+                    if conflicts_result.get('recommendation'):
+                        doc.add_paragraph()
+                        rec = doc.add_paragraph()
+                        rec.add_run("Recommendation: ").bold = True
+                        rec.add_run(conflicts_result['recommendation'])
+                    doc.add_paragraph("─" * 55)
+
+                doc.add_paragraph()
+
+                # Letter content
                 for paragraph in letter_text.split('\n\n'):
                     if paragraph.strip():
                         p = add_markdown_paragraph(doc, paragraph.strip())
@@ -1100,24 +687,23 @@ else:
 
                 print(f"  Saved: {filepath}")
 
-            # ---------------------------------------------------------------------
+            # -------------------------------------------------------------------------
             # SUMMARY
-            # ---------------------------------------------------------------------
+            # -------------------------------------------------------------------------
             print("\n" + "="*60)
-            print("PROCESSING COMPLETE")
+            print("INFERENCE COMPLETE")
             print("="*60)
             print(f"Patient: {clinical_data.get('formatted_name', 'Unknown')}")
             print(f"Account: {account_id}")
             print(f"Letter length: {len(letter_text)} chars")
             if assessment:
                 print(f"Strength: {assessment.get('overall_score', '?')}/10 - {assessment.get('overall_rating', '?')}")
-            else:
-                print(f"Strength: Assessment unavailable")
+            if conflicts_result.get('conflicts'):
+                print(f"Conflicts: {len(conflicts_result['conflicts'])} (see appendix in DOCX)")
             if EXPORT_TO_DOCX:
                 print(f"Output: {filepath}")
 
         else:
             print("\nERROR: Could not retrieve clinical data from Clarity.")
-            print("Check that the account ID exists and has clinical notes.")
 
 print("\nInference complete.")
