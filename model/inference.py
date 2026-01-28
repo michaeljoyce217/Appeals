@@ -33,7 +33,7 @@ SEPSIS_DRG_CODES = ["870", "871", "872"]
 MATCH_SCORE_THRESHOLD = 0.7
 
 # Default template path
-DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals_sepsis_only/default_sepsis_appeal_template.docx"
+DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals.gold_standard_appeals__sepsis_only/default_sepsis_appeal_template.docx"
 
 # Output configuration
 EXPORT_TO_DOCX = True

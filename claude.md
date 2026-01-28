@@ -27,7 +27,7 @@ SEPSIS/
 ├── model/
 │   └── inference.py                  # GENERATION: Vector search, write, assess, export
 ├── utils/
-│   ├── gold_standard_appeals_sepsis_only/    # Current gold letters + default template
+│   ├── gold_standard_appeals.gold_standard_appeals__sepsis_only/  # Current gold letters + default template
 │   ├── gold_standard_appeals_sepsis_multiple/ # Future use
 │   ├── sample_denial_letters/        # New denial letters to process (PDFs)
 │   ├── propel_data/                  # Clinical criteria definitions (PDFs)

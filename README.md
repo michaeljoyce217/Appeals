@@ -113,7 +113,7 @@ SEPSIS/
 ├── model/
 │   └── inference.py                  # GENERATION: Vector search, write, assess, export
 ├── utils/
-│   ├── gold_standard_appeals_sepsis_only/    # Current gold letters + default template
+│   ├── gold_standard_appeals.gold_standard_appeals__sepsis_only/    # Current gold letters + default template
 │   ├── gold_standard_appeals_sepsis_multiple/ # Future use
 │   ├── sample_denial_letters/  # Denial letters to test with (PDFs)
 │   ├── propel_data/            # Clinical criteria definitions (PDFs)
@@ -140,7 +140,7 @@ Note: Structured data (labs, vitals, meds) is queried directly from Clarity at i
 
 Copy files to Databricks notebooks and set the paths:
 ```python
-GOLD_LETTERS_PATH = "/Workspace/Repos/your-user/fudgesicle/utils/gold_standard_appeals_sepsis_only"
+GOLD_LETTERS_PATH = "/Workspace/Repos/your-user/fudgesicle/utils/gold_standard_appeals.gold_standard_appeals__sepsis_only"
 PROPEL_DATA_PATH = "/Workspace/Repos/your-user/fudgesicle/utils/propel_data"
 ```
 

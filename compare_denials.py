@@ -5,7 +5,7 @@
 # =============================================================================
 # CELL 1: Setup (copy paths from featurization.py)
 # =============================================================================
-GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals_sepsis_only"
+GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals.gold_standard_appeals__sepsis_only"
 DENIAL_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/sample_denial_letters"
 
 # =============================================================================
