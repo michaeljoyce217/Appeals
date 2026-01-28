@@ -13,6 +13,10 @@
 #
 # Run on Databricks Runtime 15.4 LTS ML
 
+# Uncomment and run ONCE per cluster session:
+# %pip install azure-ai-documentintelligence==1.0.2 openai python-docx
+# dbutils.library.restartPython()
+
 # =============================================================================
 # CELL 1: Configuration
 # =============================================================================
