@@ -821,7 +821,7 @@ def detect_conflicts(notes_summary, structured_summary):
 
         result_text = response.choices[0].message.content.strip()
 
-        # Parse conflicts
+        # Parse conflicts - only capture lines with actual content after "CONFLICT X:"
         conflicts = []
         recommendation = ""
 
@@ -829,7 +829,11 @@ def detect_conflicts(notes_summary, structured_summary):
         for line in lines:
             line = line.strip()
             if line.startswith("CONFLICT"):
-                conflicts.append(line)
+                # Check if there's actual content after "CONFLICT X:"
+                if ":" in line:
+                    after_colon = line.split(":", 1)[1].strip() if len(line.split(":", 1)) > 1 else ""
+                    if after_colon:  # Only add if there's content after the colon
+                        conflicts.append(line)
             elif line.startswith("RECOMMENDATION:"):
                 recommendation = line.replace("RECOMMENDATION:", "").strip()
 
