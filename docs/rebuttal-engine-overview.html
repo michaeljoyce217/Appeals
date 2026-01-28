@@ -452,7 +452,7 @@
             <ul>
                 <li><strong>Vector Search:</strong> Finds the most similar past denial using embeddings - matches proven winning arguments to new cases</li>
                 <li><strong>Default Template Fallback:</strong> When no good match is found, uses a default template as structural guide</li>
-                <li><strong>Comprehensive Clinical Evidence:</strong> Pulls 14 note types from Clarity with automatic extraction of timestamped clinical data</li>
+                <li><strong>Comprehensive Clinical Evidence:</strong> Synthesizes physician notes (14 types - clinical judgment) with structured data (labs, vitals, meds - objective measurements), detecting conflicts between them</li>
                 <li><strong>Smart Propel Integration:</strong> LLM extracts key criteria from Propel PDFs into concise summaries for prompts</li>
                 <li><strong>Validation Checkpoints:</strong> Built-in checks verify paths, tables, and generation results at each step</li>
                 <li><strong>Built In-House:</strong> No vendor lock-in, full control over improvements and expansion</li>
@@ -856,179 +856,177 @@
         <section id="technical" class="panel">
             <h2>Technical Architecture</h2>
             <p>
-                The Sepsis Appeal Engine is Mercy's first <strong>multi-agent AI system</strong> - an orchestrated
-                pipeline of specialized AI agents that collaborate to transform a denial PDF into a complete appeal letter.
-                Each denial is processed end-to-end in a single run - no batch processing, no intermediate tables.
+                The Sepsis Appeal Engine uses a <strong>three-file pipeline</strong> that separates concerns:
+                one-time knowledge base setup, per-case data preparation, and letter generation.
             </p>
 
-            <h3>Single-Letter Processing Flow</h3>
+            <h3>Three-File Pipeline</h3>
             <div class="pipeline-visual">
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                         SINGLE-LETTER PROCESSING (inference.py)                          │
-│                                                                                          │
-│   [Denial PDF]                                                                           │
-│        │                                                                                 │
-│        ▼                                                                                 │
-│   ┌─────────────────────┐                                                                │
-│   │  DOCUMENT INTEL     │  Azure AI Document Intelligence                                │
-│   │  AGENT              │  • OCR extraction from PDF                                     │
-│   │                     │  • Page-by-page text output                                    │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             │ Full denial text                                                           │
-│             ▼                                                                            │
-│   ┌─────────────────────┐                                                                │
-│   │  EXTRACTION AGENT   │  GPT-4.1 LLM                                                   │
-│   │                     │  • Extract: hsp_account_id from denial text                    │
-│   │  "Metadata          │                                                                │
-│   │   Extraction"       │  (POC only - workqueue provides this directly in production)  │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             │ account_id                                                                 │
-│             ▼                                                                            │
-│   ┌─────────────────────┐                                                                │
-│   │  PARSER AGENT       │  GPT-4.1 LLM                                                   │
-│   │                     │  • Extract: payor name                                         │
-│   │  "Structured Data   │  • Extract: original_drg, proposed_drg (only if explicit)     │
-│   │   Extraction"       │  • Classify: is_sepsis (true/false)                            │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             │ payor, DRGs, is_sepsis                                                     │
-│             ▼                                                                            │
-│   ┌─────────────────────┐    ┌─────────────────────────────────────────────────┐         │
-│   │  EMBEDDING +        │◄───│  Gold Letter Library (Unity Catalog)             │         │
-│   │  RETRIEVAL AGENT    │    │                                                  │         │
-│   │                     │    │  Each gold letter contains:                      │         │
-│   │  text-embedding-    │    │  • Original DENIAL text (with embedding)         │         │
-│   │  ada-002            │    │  • Winning APPEAL text (used as template)        │         │
-│   │                     │    │                                                  │         │
-│   │  Process:           │    │  Logic: Find the past denial most similar to    │         │
-│   │  1. Embed new denial│    │  this new denial, then use its winning appeal   │         │
-│   │     text (1536 dims)│    │  as a template - proven arguments get reused    │         │
-│   │  2. Compare vs all  │    │                                                  │         │
-│   │     gold denial     │    │  Threshold: 0.7 cosine similarity               │         │
-│   │     embeddings      │    │  • Score >= 0.7: Use matched appeal template    │         │
-│   │  3. Return best     │    │  • Score < 0.7: Use default template instead    │         │
-│   │     match           │    │                                                  │         │
-│   └─────────┬───────────┘    └─────────────────────────────────────────────────┘         │
-│             │                                                                            │
-│             │ Best Match: gold letter appeal text (or default template)                  │
-│             ▼                                                                            │
-│   ┌─────────────────────┐    ┌───────────────────────────────────────────────────┐       │
-│   │  CLARITY QUERY      │◄───│            EPIC CLARITY DATABASE                   │       │
-│   │                     │    │                                                    │       │
-│   │  "Clinical Context" │    │   14 CLINICAL NOTE TYPES RETRIEVED:                │       │
-│   │                     │    │   Progress Notes  │  Consults       │ H&P          │       │
-│   │  Queries for this   │    │   Discharge Summ  │  ED Notes       │ Initial Assess│      │
-│   │  single account     │    │   ED Triage       │  ED Provider    │ Addendum      │      │
-│   │                     │    │   Hospital Course │  Subj/Objective │ Assess & Plan │      │
-│   │                     │    │   Nursing Notes   │  Code Docs      │              │       │
-│   │                     │    │                                                    │       │
-│   │                     │    │   Notes < 8,000 chars: pass through unchanged      │       │
-│   │                     │    │   Notes > 8,000 chars: LLM extracts key clinical   │       │
-│   │                     │    │     data (SOFA components, vitals, labs, infection │       │
-│   │                     │    │     evidence, timestamps) to support appeal        │       │
-│   └─────────┬───────────┘    └───────────────────────────────────────────────────┘       │
-│             │                                                                            │
-│             │ Clinical notes (short pass through, long ones LLM-extracted)               │
-│             ▼                                                                            │
-│   ┌─────────────────────┐    ┌─────────────────────┐                                     │
-│   │  WRITER AGENT       │◄───│  Propel Criteria    │                                     │
-│   │                     │    │  (from Unity        │                                     │
-│   │  GPT-4.1 LLM        │    │   Catalog)          │                                     │
-│   │  "Appeal Generation"│    └─────────────────────┘                                     │
-│   │                     │                                                                │
-│   │  CONTEXT INCLUDES:  │                                                                │
-│   │  • Denial letter    │                                                                │
-│   │  • Gold appeal      │                                                                │
-│   │  • Propel criteria  │                                                                │
-│   │  • 14 clinical notes│                                                                │
-│   │  • Patient info     │                                                                │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             │ Generated appeal letter                                                    │
-│             ▼                                                                            │
-│   ┌─────────────────────┐                                                                │
-│   │  ASSESSMENT AGENT   │  GPT-4.1 LLM                                                   │
-│   │                     │  • Evaluates letter against Propel criteria                    │
-│   │  "Strength          │  • Scores argument structure vs denial/gold                    │
-│   │   Assessment"       │  • Flags missing evidence from clinical notes                  │
-│   │                     │  • Returns: score (1-10), rating, detailed breakdown           │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             ▼                                                                            │
-│   ┌─────────────────────┐                                                                │
-│   │  DOCX EXPORT        │  Formatted Word document                                       │
-│   │                     │  • Assessment section before letter body                       │
-│   │  "Human Review      │  • Saved to utils/outputs/                                     │
-│   │   Ready"            │  • Filename: {account_id}_{patient}_appeal.docx                │
-│   └─────────────────────┘                                                                │
-│                                                                                          │
-│   *In production, account_id comes from Epic workqueue instead of LLM extraction         │
-│                                                                                          │
+│                    ONE-TIME SETUP: featurization_train.py                               │
+│                                                                                         │
+│   [Gold Letter PDFs]              [Propel PDFs]                                         │
+│          │                              │                                               │
+│          ▼                              ▼                                               │
+│   ┌──────────────────┐          ┌──────────────────┐                                    │
+│   │ Extract appeal & │          │ Extract clinical │                                    │
+│   │ denial portions  │          │ criteria via LLM │                                    │
+│   │ Generate denial  │          │                  │                                    │
+│   │ embeddings       │          │                  │                                    │
+│   └────────┬─────────┘          └────────┬─────────┘                                    │
+│            │                             │                                              │
+│            ▼                             ▼                                              │
+│   ┌─────────────────────────────────────────────────────────────────┐                   │
+│   │              UNITY CATALOG KNOWLEDGE BASE                        │                   │
+│   │  fudgesicle_gold_letters  │  fudgesicle_propel_data             │                   │
+│   └─────────────────────────────────────────────────────────────────┘                   │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                 PER-CASE DATA PREP: featurization_inference.py                          │
+│                                                                                         │
+│   [Denial PDF]                                                                          │
+│        │                                                                                │
+│        ▼                                                                                │
+│   ┌─────────────────────┐                                                               │
+│   │  1. PARSE DENIAL    │  Azure AI Document Intelligence                               │
+│   │     Extract text    │  → denial_text                                                │
+│   └─────────┬───────────┘                                                               │
+│             ▼                                                                           │
+│   ┌─────────────────────┐                                                               │
+│   │  2. EXTRACT INFO    │  GPT-4.1: account_id, payor, DRGs, is_sepsis                  │
+│   │                     │  → denial_info                                                │
+│   └─────────┬───────────┘                                                               │
+│             ▼                                                                           │
+│   ┌─────────────────────────────────────────────────────────────────┐                   │
+│   │                    QUERY EPIC CLARITY                            │                   │
+│   │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │                   │
+│   │  │ 3. CLINICAL     │  │ 4. STRUCTURED   │  │                 │  │                   │
+│   │  │    NOTES        │  │    DATA         │  │                 │  │                   │
+│   │  │                 │  │                 │  │                 │  │                   │
+│   │  │ 14 note types:  │  │ • Labs          │  │ 5. DIAGNOSES    │  │                   │
+│   │  │ Progress, H&P,  │  │ • Vitals        │  │    (DX records) │  │                   │
+│   │  │ Discharge, ED,  │  │ • Medications   │  │                 │  │                   │
+│   │  │ Consults, etc.  │  │                 │  │                 │  │                   │
+│   │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘  │                   │
+│   └───────────┼─────────────────────┼─────────────────────┼─────────┘                   │
+│               ▼                     ▼                     ▼                             │
+│   ┌─────────────────────┐  ┌─────────────────────┐                                      │
+│   │  6. EXTRACT NOTES   │  │  7. EXTRACT         │                                      │
+│   │     (LLM for >8k    │  │     STRUCTURED      │                                      │
+│   │      char notes)    │  │     SUMMARY (LLM)   │                                      │
+│   │  → clinical_notes   │  │  → structured_data  │                                      │
+│   └─────────┬───────────┘  └─────────┬───────────┘                                      │
+│             └───────────┬────────────┘                                                  │
+│                         ▼                                                               │
+│   ┌─────────────────────────────────────────────────────────────────┐                   │
+│   │  8. DETECT CONFLICTS                                             │                   │
+│   │     Compare physician notes vs structured data                   │                   │
+│   │     Flag discrepancies (e.g., "MAP >65" in notes but <65 in data)│                   │
+│   │  → conflicts                                                     │                   │
+│   └─────────────────────────────────────────────────────────────────┘                   │
+│                                                                                         │
+│   OUTPUT: denial_text, denial_info, clinical_notes, structured_data, conflicts          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                      GENERATION: inference.py                                           │
+│                                                                                         │
+│   [Data from featurization_inference.py]  +  [Knowledge Base]                           │
+│                    │                              │                                     │
+│                    ▼                              ▼                                     │
+│   ┌─────────────────────────────────────────────────────────────────┐                   │
+│   │  1. VECTOR SEARCH                                                │                   │
+│   │     Embed denial → Find most similar gold letter                │                   │
+│   │     (or use default template if no good match)                  │                   │
+│   │  → gold_letter_template                                         │                   │
+│   └─────────┬───────────────────────────────────────────────────────┘                   │
+│             ▼                                                                           │
+│   ┌─────────────────────────────────────────────────────────────────┐                   │
+│   │  2. WRITE APPEAL (GPT-4.1)                                       │                   │
+│   │                                                                  │                   │
+│   │     INPUTS:                      EVIDENCE HIERARCHY:            │                   │
+│   │     • Denial letter              • Physician notes (PRIMARY)    │                   │
+│   │     • Gold letter template       • Structured data (SUPPORTING) │                   │
+│   │     • Propel criteria            • Diagnoses (QUOTABLE)         │                   │
+│   │     • Clinical notes                                            │                   │
+│   │     • Structured data summary                                   │                   │
+│   │  → appeal_letter                                                │                   │
+│   └─────────┬───────────────────────────────────────────────────────┘                   │
+│             ▼                                                                           │
+│   ┌─────────────────────────────────────────────────────────────────┐                   │
+│   │  3. ASSESS STRENGTH (GPT-4.1)                                    │                   │
+│   │     Score 1-10 against Propel criteria                          │                   │
+│   │     Flag present (✓), could strengthen (△), missing (✗)         │                   │
+│   │  → assessment                                                   │                   │
+│   └─────────┬───────────────────────────────────────────────────────┘                   │
+│             ▼                                                                           │
+│   ┌─────────────────────────────────────────────────────────────────┐                   │
+│   │  4. EXPORT DOCX                                                  │                   │
+│   │     • Assessment section (for CDI reviewer)                     │                   │
+│   │     • Appeal letter body                                        │                   │
+│   │     • Conflicts appendix (if any discrepancies detected)        │                   │
+│   └─────────────────────────────────────────────────────────────────┘                   │
+│                                                                                         │
+│   OUTPUT: {account_id}_{patient}_appeal.docx                                            │
 └─────────────────────────────────────────────────────────────────────────────────────────┘</div>
 
-            <h3>Agent Summary</h3>
+            <h3>Pipeline Summary</h3>
             <table class="comparison-table">
                 <tr>
-                    <th>Agent</th>
-                    <th>Technology</th>
-                    <th>Function</th>
-                    <th>Output</th>
+                    <th>File</th>
+                    <th>When</th>
+                    <th>Purpose</th>
+                    <th>Key Outputs</th>
                 </tr>
                 <tr>
-                    <td><strong>Document Intel</strong></td>
-                    <td>Azure AI Document Intelligence</td>
-                    <td>OCR extraction from PDF pages</td>
-                    <td>Raw text per page</td>
+                    <td><strong>featurization_train.py</strong></td>
+                    <td>One-time (or when adding gold letters)</td>
+                    <td>Build knowledge base from PDFs</td>
+                    <td>Gold letters + Propel tables in Unity Catalog</td>
                 </tr>
                 <tr>
-                    <td><strong>Extraction*</strong></td>
-                    <td>GPT-4.1</td>
-                    <td>Extract hsp_account_id from denial text</td>
-                    <td>account_id for Clarity query</td>
+                    <td><strong>featurization_inference.py</strong></td>
+                    <td>Per case</td>
+                    <td>Gather all data for this denial</td>
+                    <td>Denial info, clinical notes, structured data, conflicts</td>
                 </tr>
                 <tr>
-                    <td><strong>Parser</strong></td>
-                    <td>GPT-4.1</td>
-                    <td>Extract structured fields from denial text</td>
-                    <td>payor, DRGs, is_sepsis</td>
-                </tr>
-                <tr>
-                    <td><strong>Embedding</strong></td>
-                    <td>text-embedding-ada-002</td>
-                    <td>Generate semantic vector</td>
-                    <td>1536-dim denial fingerprint</td>
-                </tr>
-                <tr>
-                    <td><strong>Retrieval</strong></td>
-                    <td>Cosine Similarity</td>
-                    <td>Find most similar past denial</td>
-                    <td>Best-match gold letter</td>
-                </tr>
-                <tr>
-                    <td><strong>Writer</strong></td>
-                    <td>GPT-4.1</td>
-                    <td>Generate complete appeal letter</td>
-                    <td>Persuasive appeal text</td>
-                </tr>
-                <tr>
-                    <td><strong>Structured Data Extractor**</strong></td>
-                    <td>GPT-4.1</td>
-                    <td>Extract sepsis data from labs/vitals/meds timeline</td>
-                    <td>SOFA components, bundle compliance</td>
-                </tr>
-                <tr>
-                    <td><strong>Assessment</strong></td>
-                    <td>GPT-4.1</td>
-                    <td>Evaluate letter strength against criteria</td>
-                    <td>Score, rating, detailed breakdown</td>
+                    <td><strong>inference.py</strong></td>
+                    <td>Per case</td>
+                    <td>Generate and assess appeal letter</td>
+                    <td>DOCX with assessment + conflicts appendix</td>
                 </tr>
             </table>
-            <p style="font-size: 0.85rem; color: #666; margin-top: -0.5rem;">
-                <em>*POC only: Extraction Agent extracts account_id from denial text. In production, workqueue provides this directly - Extraction Agent becomes unnecessary.</em><br>
-                <em>**Now integrated into featurization_inference.py - runs automatically for every case.</em>
-            </p>
+
+            <h3>Evidence Synthesis</h3>
+            <table class="comparison-table">
+                <tr>
+                    <th>Evidence Type</th>
+                    <th>Source</th>
+                    <th>Role in Appeal</th>
+                </tr>
+                <tr>
+                    <td><strong>Physician Notes</strong></td>
+                    <td>14 clinical note types from Clarity</td>
+                    <td>PRIMARY - Clinical judgment and interpretation</td>
+                </tr>
+                <tr>
+                    <td><strong>Structured Data</strong></td>
+                    <td>Labs, vitals, medications from Clarity</td>
+                    <td>SUPPORTING - Objective measurements to back up notes</td>
+                </tr>
+                <tr>
+                    <td><strong>Diagnoses</strong></td>
+                    <td>DX records from Clarity (DX_NAME)</td>
+                    <td>QUOTABLE - Specific documented diagnoses to cite</td>
+                </tr>
+                <tr>
+                    <td><strong>Conflicts</strong></td>
+                    <td>Comparison of notes vs structured data</td>
+                    <td>FLAGGED - Discrepancies for CDI review</td>
+                </tr>
+            </table>
 
             <h3>Why Multi-Agent Architecture?</h3>
             <div class="benefit-grid">
