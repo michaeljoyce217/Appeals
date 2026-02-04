@@ -13,6 +13,12 @@
 #
 # Run on Databricks Runtime 15.4 LTS ML
 
+# =============================================================================
+# CELL 0: Install Dependencies (run this cell FIRST, then restart)
+# =============================================================================
+# IMPORTANT: Run this cell by itself, then run the rest of the notebook.
+# After restart, the packages persist for the cluster session.
+#
 # Uncomment and run ONCE per cluster session:
 # %pip install azure-ai-documentintelligence==1.0.2 openai python-docx
 # dbutils.library.restartPython()
@@ -37,7 +43,7 @@ SEPSIS_DRG_CODES = ["870", "871", "872"]
 MATCH_SCORE_THRESHOLD = 0.7
 
 # Default template path
-DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals.gold_standard_appeals__sepsis_only/default_sepsis_appeal_template.docx"
+DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals_sepsis_only/default_sepsis_appeal_template.docx"
 
 # Output configuration
 EXPORT_TO_DOCX = True
@@ -294,47 +300,7 @@ else:
 {denial_letter_text}
 
 # Clinical Notes (PRIMARY EVIDENCE - from physician documentation)
-## Discharge Summary
-{discharge_summary}
-
-## H&P Note
-{hp_note}
-
-## Progress Notes
-{progress_note}
-
-## Consult Notes
-{consult_note}
-
-## ED Notes
-{ed_notes}
-
-## Initial Assessments
-{initial_assessment}
-
-## ED Triage Notes
-{ed_triage}
-
-## ED Provider Notes
-{ed_provider_note}
-
-## Addendum Note
-{addendum_note}
-
-## Hospital Course
-{hospital_course}
-
-## Subjective & Objective
-{subjective_objective}
-
-## Assessment & Plan Note
-{assessment_plan}
-
-## Nursing Note
-{nursing_note}
-
-## Code Documentation
-{code_documentation}
+{clinical_notes_section}
 
 # Structured Data Summary (SUPPORTING EVIDENCE - from labs, vitals, meds)
 {structured_data_summary}
@@ -574,23 +540,18 @@ Return ONLY valid JSON in this format:
     else:
         clinical_definition_section = "No specific definition loaded."
 
+    # Build clinical notes section dynamically from all available notes
+    clinical_notes_parts = []
+    for note_key, note_content in extracted_notes.items():
+        if note_content and note_content != "Not available":
+            display_name = note_key.replace("_", " ").title()
+            clinical_notes_parts.append(f"## {display_name}\n{note_content}")
+    clinical_notes_section = "\n\n".join(clinical_notes_parts) if clinical_notes_parts else "No clinical notes available."
+
     # Build prompt
     writer_prompt = WRITER_PROMPT.format(
         denial_letter_text=case_data["denial_text"],
-        discharge_summary=extracted_notes.get("discharge_summary", "Not available"),
-        hp_note=extracted_notes.get("hp_note", "Not available"),
-        progress_note=extracted_notes.get("progress_note", "Not available"),
-        consult_note=extracted_notes.get("consult_note", "Not available"),
-        ed_notes=extracted_notes.get("ed_notes", "Not available"),
-        initial_assessment=extracted_notes.get("initial_assessment", "Not available"),
-        ed_triage=extracted_notes.get("ed_triage", "Not available"),
-        ed_provider_note=extracted_notes.get("ed_provider_note", "Not available"),
-        addendum_note=extracted_notes.get("addendum_note", "Not available"),
-        hospital_course=extracted_notes.get("hospital_course", "Not available"),
-        subjective_objective=extracted_notes.get("subjective_objective", "Not available"),
-        assessment_plan=extracted_notes.get("assessment_plan", "Not available"),
-        nursing_note=extracted_notes.get("nursing_note", "Not available"),
-        code_documentation=extracted_notes.get("code_documentation", "Not available"),
+        clinical_notes_section=clinical_notes_section,
         structured_data_summary=structured_summary,
         clinical_definition_section=clinical_definition_section,
         gold_letter_section=gold_letter_section,
