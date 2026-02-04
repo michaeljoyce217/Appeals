@@ -23,7 +23,8 @@
 SEPSIS/
 ├── data/
 │   ├── featurization_train.py        # ONE-TIME: Knowledge base ingestion (gold letters + propel)
-│   └── featurization_inference.py    # PER-CASE: Data prep (denial + notes + structured data)
+│   ├── featurization_inference.py    # PER-CASE: Data prep (denial + notes + structured data)
+│   └── structured_data_ingestion.py  # PER-CASE: Labs, vitals, meds, diagnoses from Clarity
 ├── model/
 │   └── inference.py                  # GENERATION: Vector search, write, assess, export
 ├── utils/
