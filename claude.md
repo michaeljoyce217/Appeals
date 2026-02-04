@@ -1,6 +1,6 @@
 # Sepsis Appeal Engine - Master Prompt
 
-**Last Updated:** 2026-01-27
+**Last Updated:** 2026-02-04
 **Repo:** https://github.com/michaeljoyce217/SEPSIS
 
 ---
@@ -69,7 +69,7 @@ All data gathering for a single case. **Writes to case tables for inference.py t
 | 1. Parse Denial PDF | Azure AI Document Intelligence | OCR extraction from denial PDF |
 | 2. Extract Denial Info | GPT-4.1 | Extract: account_id, payor, DRGs, is_sepsis |
 | 3. Query Clinical Notes | Spark SQL | Get ALL notes from 47 types from Epic Clarity |
-| 4. Extract Clinical Notes | GPT-4.1 | Extract SOFA components + clinical data with timestamps |
+| 4. Extract Clinical Notes | GPT-4.1 (parallel) | Extract SOFA components + clinical data with timestamps |
 | 5. Query Structured Data | Spark SQL | Get labs, vitals, meds, diagnoses from Clarity |
 | 6. Extract Structured Summary | GPT-4.1 | Summarize sepsis-relevant data with diagnosis descriptions |
 | 7. Detect Conflicts | GPT-4.1 | Compare notes vs structured data for discrepancies |
@@ -155,8 +155,8 @@ We query DX records directly from Epic's CLARITY_EDG table - these are more gran
 - All diagnoses include timestamps - LLM decides relevance based on date
 - ICD-10 codes are NOT used - DX_NAME is what we quote in appeals
 
-### LLM Note Extraction
-All clinical notes are extracted via LLM to pull relevant clinical data WITH timestamps in a consistent structured format (e.g., "03/15/2024 08:00: Lactate 4.2, MAP 63"). This ensures homogeneous output regardless of note length.
+### LLM Note Extraction (Parallel)
+All clinical notes are extracted via LLM in parallel (ThreadPoolExecutor) to pull relevant clinical data WITH timestamps in a consistent structured format (e.g., "03/15/2024 08:00: Lactate 4.2, MAP 63"). This ensures homogeneous output regardless of note length and keeps latency flat despite the large number of note types.
 
 ### Conflict Detection
 Compares physician notes vs structured data to identify discrepancies:
@@ -226,23 +226,25 @@ Appeal letters are saved to `utils/outputs/` with filename format: `{account_id}
 
 Based on Azure OpenAI GPT-4.1 standard pricing ($2.20/1M input, $8.80/1M output):
 
-### Per Appeal Letter (~$0.30)
+### Per Appeal Letter (~$0.50)
 | Step | Input Tokens | Output Tokens | Cost |
 |------|-------------|---------------|------|
 | Denial info extraction | ~4,000 | ~100 | $0.01 |
-| Note extraction (4 calls avg) | ~12,000 | ~3,200 | $0.05 |
+| Note extraction (~20 calls avg, parallel) | ~50,000 | ~12,000 | $0.22 |
 | Structured data extraction | ~8,000 | ~1,500 | $0.03 |
 | Conflict detection | ~6,000 | ~500 | $0.02 |
-| Appeal letter generation | ~55,000 | ~3,000 | $0.15 |
+| Appeal letter generation | ~60,000 | ~3,000 | $0.16 |
 | Strength assessment | ~15,000 | ~800 | $0.04 |
-| **Total** | ~100,000 | ~9,100 | **~$0.30** |
+| **Total** | ~143,000 | ~17,900 | **~$0.48** |
+
+Note: 47 note types are queried but ~20 typically have content for a given sepsis case. All extractions run in parallel so wall-clock time is similar to a single call.
 
 ### Monthly Projections
 | Volume | LLM Cost |
 |--------|----------|
-| 100 appeals/month | ~$30 |
-| 500 appeals/month | ~$150 |
-| 1,000 appeals/month | ~$300 |
+| 100 appeals/month | ~$50 |
+| 500 appeals/month | ~$250 |
+| 1,000 appeals/month | ~$500 |
 
 **One-time setup:** <$1 for gold letter + Propel ingestion
 
