@@ -299,7 +299,7 @@ The assessment never blocks letter generation.
 
 | Question | Why It Matters | Status |
 |----------|----------------|--------|
-| Which of the ~75 note types are most valuable for sepsis appeals? | Currently pulling 14 - may be missing key evidence or pulling noise | Pending |
+| Which of the ~75 note types are most valuable for sepsis appeals? | Currently pulling 47 - may be missing key evidence or pulling noise | Pending |
 | Are there specific phrases/arguments that win appeals? | Could weight these higher in argument structure scoring | Pending |
 | What makes a "weak" vs "strong" appeal in their experience? | Calibrate assessment scoring to match expert judgment | Pending |
 

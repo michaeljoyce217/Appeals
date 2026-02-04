@@ -270,7 +270,7 @@
 │   ┌─────────────────────┐    ┌───────────────────────────────────────────────────┐       │
 │   │  CLARITY QUERY      │◄───│            EPIC CLARITY DATABASE                   │       │
 │   │                     │    │                                                    │       │
-│   │  "Clinical Context" │    │   14 CLINICAL NOTE TYPES RETRIEVED:                │       │
+│   │  "Clinical Context" │    │   47 CLINICAL NOTE TYPES RETRIEVED:                │       │
 │   │                     │    │   Progress Notes  │  Consults       │ H&P          │       │
 │   │  Queries for this   │    │   Discharge Summ  │  ED Notes       │ Initial Assess│      │
 │   │  single account     │    │   ED Triage       │  ED Provider    │ Addendum      │      │
@@ -309,7 +309,7 @@
 │   │  • Denial letter    │                                                                │
 │   │  • Gold appeal      │                                                                │
 │   │  • Propel criteria  │                                                                │
-│   │  • 14 clinical notes│                                                                │
+│   │  • 47 clinical notes│                                                                │
 │   │  • Structured data**│                                                                │
 │   │  • Patient info     │                                                                │
 │   └─────────┬───────────┘                                                                │
@@ -427,7 +427,7 @@
                 <h4>Per Case: 4-18 LLM Calls (POC) / 3-17 (Production)</h4>
                 <p>
                     <strong>POC Minimum (4 calls):</strong> Parser + Extraction (account_id) + Writer + Assessment<br>
-                    <strong>POC Maximum (18 calls):</strong> Parser + Extraction + Writer + Assessment + 14 Note extractions<br>
+                    <strong>POC Maximum (18 calls):</strong> Parser + Extraction + Writer + Assessment + 47 Note extractions<br>
                     <strong>Production:</strong> 3-17 calls (workqueue provides account_id, no Extraction Agent needed)<br>
                     <strong>Typical:</strong> ~6-9 calls per case (parser, extraction*, writer, assessment, 3-6 note extractions)<br>
                     <strong>With Structured Data**:</strong> +1 call per case for labs/vitals/meds extraction
@@ -519,7 +519,7 @@
                     <td>5. Query Clarity</td>
                     <td>account_id</td>
                     <td>Spark SQL query</td>
-                    <td>14 clinical note types</td>
+                    <td>47 clinical note types</td>
                 </tr>
                 <tr>
                     <td>6. Extract Notes</td>

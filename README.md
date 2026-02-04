@@ -13,7 +13,7 @@ When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this sy
 1. **Parsing denial letters** - OCR extracts text from denial PDF
 2. **Vector search** - Finds the most similar past denial from our gold standard library (uses denial text only)
 3. **Extracting denial info** - LLM extracts account ID, payor, DRG codes, and determines if sepsis-related
-4. **Querying clinical data** - Pulls 14 note types from Epic Clarity for this specific account
+4. **Querying clinical data** - Pulls 47 note types from Epic Clarity for this specific account
 5. **Learning from winners** - Uses the matched winning appeal as a template/guide
 6. **Applying clinical criteria** - Includes official Propel sepsis definitions
 7. **Generating appeals** - Creates patient-specific appeal letters using clinical notes
@@ -70,9 +70,9 @@ When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this sy
 | **Gold Letter Learning** | Uses winning appeals as templates - proven arguments get reused |
 | **Default Template Fallback** | When no good match found, uses default template as structural guide |
 | **Propel Integration** | LLM extracts key criteria from Propel PDFs into concise summaries |
-| **Comprehensive Clinical Notes** | Pulls 14 note types from Clarity (see below) |
+| **Comprehensive Clinical Notes** | Pulls 47 note types from Clarity (see below) |
 | **Structured Data Summary** | Labs, vitals, meds queried from Clarity and summarized for sepsis relevance |
-| **Smart Note Extraction** | Long notes (>8k chars) auto-extracted with timestamps via LLM |
+| **LLM Note Extraction** | All notes extracted with timestamps via LLM in parallel |
 | **SOFA Score Extraction** | Prioritizes organ dysfunction data: lactate, MAP, creatinine, platelets, bilirubin, GCS, PaO2/FiO2 |
 | **Conservative DRG Extraction** | Only extracts DRGs if explicitly stated - no hallucination of plausible codes |
 | **Markdown Bold Parsing** | `**text**` in LLM output renders as bold in DOCX |
@@ -82,26 +82,11 @@ When insurance payors deny or downgrade sepsis DRG claims (870/871/872), this sy
 
 ## Clinical Notes (from Epic Clarity)
 
-The system pulls **14 sepsis-relevant note types** for comprehensive clinical evidence:
+The system pulls **47 clinical note types** for comprehensive clinical evidence:
 
-| Code | Note Type | Purpose |
-|------|-----------|---------|
-| 1 | **Progress Notes** | Daily physician documentation |
-| 2 | **Consults** | Specialist consultations (ID, Pulm, etc.) |
-| 4 | **H&P** | History & Physical - admission assessment |
-| 5 | **Discharge Summary** | Complete hospitalization summary |
-| 6 | **ED Notes** | Emergency department notes |
-| 7 | **Initial Assessments** | Early clinical picture |
-| 8 | **ED Triage Notes** | Arrival vitals, chief complaint |
-| 19 | **ED Provider Notes** | ED physician assessment |
-| 29 | **Addendum Note** | Updates/corrections to notes |
-| 32 | **Hospital Course** | Timeline narrative |
-| 33 | **Subjective & Objective** | Clinical findings (S&O) |
-| 38 | **Assessment & Plan Note** | Physician reasoning |
-| 70 | **Nursing Note** | Vital signs, observations |
-| 10000 | **Code Documentation** | Code events (if applicable) |
+Progress Notes, Consults, H&P, Discharge Summary, ED Notes, Initial Assessments, ED Triage Notes, ED Provider Notes, Addendum Note, Hospital Course, Subjective & Objective, Assessment & Plan Note, Nursing Note, Code Documentation, Anesthesia Preprocedure Evaluation, Anesthesia Postprocedure Evaluation, H&P (View-Only), Internal H&P Note, Anesthesia Procedure Notes, L&D Delivery Note, Pre-Procedure Assessment, Inpatient Medication Chart, Hospice, Hospice Plan of Care, Hospice Non-Covered, OR Post-Procedure Note, Peri-OP, Treatment Plan, Delivery, Brief Op Note, Operative Report, Scanned Form, Therapy Evaluation, Therapy Treatment, Therapy Discharge, Therapy Progress Note, Wound Care, Anesthesia Post Evaluation, Query, Anesthesia Post-Op Follow-up Note, Anesthesia Handoff, Anesthesia PAT Evaluation, Anesthesiology, ED Attestation Note, ED Procedure Note, ED Re-evaluation Note, CDU Provider Note
 
-**Note Extraction**: Long notes (>8k chars) are automatically extracted via LLM to pull relevant clinical data with timestamps, reducing token usage while preserving key evidence.
+**Note Extraction**: All notes are extracted via LLM in parallel to pull relevant clinical data with timestamps in a consistent structured format.
 
 ## Repository Structure
 
@@ -173,7 +158,7 @@ KNOWN_ACCOUNT_ID = None  # or "12345678"
 
 Run the notebook. For this denial:
 - Parses PDF and extracts denial info (account ID, payor, DRGs) via `featurization_inference.py`
-- Queries Clarity for clinical notes (14 note types) and structured data (labs, vitals, meds)
+- Queries Clarity for clinical notes (47 note types) and structured data (labs, vitals, meds)
 - Detects conflicts between physician notes and structured data
 - Finds best matching gold letter via vector search
 - Generates appeal using gold letter + notes + structured data
@@ -197,14 +182,12 @@ Run the notebook. For this denial:
 | `KNOWN_ACCOUNT_ID` | None | Account ID if known (production) |
 | `SCOPE_FILTER` | "sepsis" | Which denial types to process |
 | `MATCH_SCORE_THRESHOLD` | 0.7 | Minimum similarity to use gold letter |
-| `NOTE_EXTRACTION_THRESHOLD` | 8000 | Char limit before LLM extraction |
 | `EXPORT_TO_DOCX` | True | Export letters as Word documents |
 
 ### featurization_inference.py (Called by inference.py)
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `NOTE_EXTRACTION_THRESHOLD` | 8000 | Char limit before LLM extraction |
 | `RUN_STRUCTURED_DATA` | True | Query and extract structured data |
 | `RUN_CONFLICT_DETECTION` | True | Compare notes vs structured data |
 

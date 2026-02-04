@@ -7,7 +7,7 @@
 -- =============================================================================
 
 -- 1. Basic counts - did data load AND did denial join work?
--- All 14 sepsis-relevant note types
+-- All 47 clinical note types
 SELECT
     COUNT(*) as total_rows,
     -- Core notes
@@ -47,7 +47,7 @@ SELECT
     is_sepsis,
     denial_letter_filename,
     LENGTH(denial_letter_text) as denial_chars,
-    -- All 14 note types
+    -- All 47 note types
     LENGTH(discharge_summary_text) as discharge_chars,
     LENGTH(hp_note_text) as hp_chars,
     LENGTH(progress_note_text) as progress_chars,
@@ -65,14 +65,14 @@ SELECT
     SIZE(denial_embedding) as embedding_dims
 FROM dev.fin_ds.fudgesicle_inference;
 
--- 3. Explicit NULL check - which columns have nulls? (all 14 note types)
+-- 3. Explicit NULL check - which columns have nulls? (all 47 note types)
 SELECT
     hsp_account_id,
     CASE WHEN denial_letter_text IS NULL THEN 'NULL' ELSE 'OK' END as denial_text,
     CASE WHEN denial_letter_filename IS NULL THEN 'NULL' ELSE 'OK' END as denial_filename,
     CASE WHEN denial_embedding IS NULL THEN 'NULL' ELSE 'OK' END as embedding,
     CASE WHEN payor IS NULL THEN 'NULL' ELSE 'OK' END as payor,
-    -- 14 note types
+    -- 47 note types
     CASE WHEN discharge_summary_text IS NULL OR discharge_summary_text = 'No Note Available' THEN 'MISSING' ELSE 'OK' END as discharge,
     CASE WHEN hp_note_text IS NULL OR hp_note_text = 'No Note Available' THEN 'MISSING' ELSE 'OK' END as hp,
     CASE WHEN progress_note_text IS NULL OR progress_note_text = 'No Note Available' THEN 'MISSING' ELSE 'OK' END as progress,

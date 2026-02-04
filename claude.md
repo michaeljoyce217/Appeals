@@ -68,7 +68,7 @@ All data gathering for a single case. **Writes to case tables for inference.py t
 |------|------------|----------|
 | 1. Parse Denial PDF | Azure AI Document Intelligence | OCR extraction from denial PDF |
 | 2. Extract Denial Info | GPT-4.1 | Extract: account_id, payor, DRGs, is_sepsis |
-| 3. Query Clinical Notes | Spark SQL | Get ALL notes from 14 types from Epic Clarity |
+| 3. Query Clinical Notes | Spark SQL | Get ALL notes from 47 types from Epic Clarity |
 | 4. Extract Clinical Notes | GPT-4.1 | Extract SOFA components + clinical data with timestamps |
 | 5. Query Structured Data | Spark SQL | Get labs, vitals, meds, diagnoses from Clarity |
 | 6. Extract Structured Summary | GPT-4.1 | Summarize sepsis-relevant data with diagnosis descriptions |
@@ -127,8 +127,8 @@ Note: All tables use the `{trgt_cat}.fin_ds.` prefix (e.g., `dev.fin_ds.fudgesic
 - **Supporting Evidence:** Structured data (objective lab values, vitals, medications)
 - **Conflict Detection:** When structured data contradicts physician notes, flagged for CDI review
 
-### 14 Clinical Note Types (from Epic Clarity)
-Progress Notes, Consults, H&P, Discharge Summary, ED Notes, Initial Assessments, ED Triage Notes, ED Provider Notes, Addendum Note, Hospital Course, Subjective & Objective, Assessment & Plan Note, Nursing Note, Code Documentation
+### 47 Clinical Note Types (from Epic Clarity)
+Progress Notes, Consults, H&P, Discharge Summary, ED Notes, Initial Assessments, ED Triage Notes, ED Provider Notes, Addendum Note, Hospital Course, Subjective & Objective, Assessment & Plan Note, Nursing Note, Code Documentation, Anesthesia Preprocedure Evaluation, Anesthesia Postprocedure Evaluation, H&P (View-Only), Internal H&P Note, Anesthesia Procedure Notes, L&D Delivery Note, Pre-Procedure Assessment, Inpatient Medication Chart, Hospice, Hospice Plan of Care, Hospice Non-Covered, OR Post-Procedure Note, Peri-OP, Treatment Plan, Delivery, Brief Op Note, Operative Report, Scanned Form, Therapy Evaluation, Therapy Treatment, Therapy Discharge, Therapy Progress Note, Wound Care, Anesthesia Post Evaluation, Query, Anesthesia Post-Op Follow-up Note, Anesthesia Handoff, Anesthesia PAT Evaluation, Anesthesiology, ED Attestation Note, ED Procedure Note, ED Re-evaluation Note, CDU Provider Note
 
 **Note:** ALL notes from the encounter are retrieved (not just most recent), concatenated chronologically with timestamps.
 
@@ -155,8 +155,8 @@ We query DX records directly from Epic's CLARITY_EDG table - these are more gran
 - All diagnoses include timestamps - LLM decides relevance based on date
 - ICD-10 codes are NOT used - DX_NAME is what we quote in appeals
 
-### Smart Note Extraction
-Notes >8,000 chars are automatically extracted via LLM to pull relevant clinical data WITH timestamps (e.g., "03/15/2024 08:00: Lactate 4.2, MAP 63").
+### LLM Note Extraction
+All clinical notes are extracted via LLM to pull relevant clinical data WITH timestamps in a consistent structured format (e.g., "03/15/2024 08:00: Lactate 4.2, MAP 63"). This ensures homogeneous output regardless of note length.
 
 ### Conflict Detection
 Compares physician notes vs structured data to identify discrepancies:
@@ -213,7 +213,6 @@ Appeal letters are saved to `utils/outputs/` with filename format: `{account_id}
 |---------|---------|-------------|
 | `DENIAL_PDF_PATH` | (required) | Path to denial letter PDF to process |
 | `KNOWN_ACCOUNT_ID` | None | Account ID (if known from Epic workqueue) |
-| `NOTE_EXTRACTION_THRESHOLD` | 8000 | Char limit before LLM extraction |
 
 ### inference.py Settings
 | Setting | Default | Description |

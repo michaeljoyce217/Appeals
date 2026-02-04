@@ -3,7 +3,7 @@
 #
 # PER-CASE FEATURIZATION: Prepares all data needed for a single appeal:
 # 1. Parse denial PDF → Extract text, account ID, payor, DRGs
-# 2. Query clinical notes → ALL notes from 14 types from Epic Clarity
+# 2. Query clinical notes → ALL notes from 47 types from Epic Clarity
 # 3. Extract clinical notes → LLM summarization of long notes
 # 4. Query structured data → Labs, vitals, meds, diagnoses
 # 5. Extract structured data → LLM summarization for sepsis evidence
@@ -25,6 +25,7 @@ import os
 import re
 import json
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, ArrayType, FloatType, BooleanType, TimestampType
 
@@ -41,7 +42,6 @@ KNOWN_ACCOUNT_ID = None  # e.g., "12345678" or None to extract
 # -----------------------------------------------------------------------------
 # Processing Configuration
 # -----------------------------------------------------------------------------
-NOTE_EXTRACTION_THRESHOLD = 8000  # Chars - notes longer than this get LLM extraction
 EMBEDDING_MODEL = "text-embedding-ada-002"
 
 # -----------------------------------------------------------------------------
@@ -262,13 +262,46 @@ NOTE_TYPE_MAP = {
     'Assessment & Plan Note': ('assessment_plan_id', 'assessment_plan_csn_id', 'assessment_plan_text'),
     'Nursing Note': ('nursing_note_id', 'nursing_note_csn_id', 'nursing_note_text'),
     'Code Documentation': ('code_documentation_id', 'code_documentation_csn_id', 'code_documentation_text'),
+    'Anesthesia Preprocedure Evaluation': ('anesthesia_preprocedure_id', 'anesthesia_preprocedure_csn_id', 'anesthesia_preprocedure_text'),
+    'Anesthesia Postprocedure Evaluation': ('anesthesia_postprocedure_id', 'anesthesia_postprocedure_csn_id', 'anesthesia_postprocedure_text'),
+    'H&P (View-Only)': ('hp_view_only_id', 'hp_view_only_csn_id', 'hp_view_only_text'),
+    'Internal H&P Note': ('internal_hp_note_id', 'internal_hp_note_csn_id', 'internal_hp_note_text'),
+    'Anesthesia Procedure Notes': ('anesthesia_procedure_id', 'anesthesia_procedure_csn_id', 'anesthesia_procedure_text'),
+    'L&D Delivery Note': ('ld_delivery_note_id', 'ld_delivery_note_csn_id', 'ld_delivery_note_text'),
+    'Pre-Procedure Assessment': ('pre_procedure_assessment_id', 'pre_procedure_assessment_csn_id', 'pre_procedure_assessment_text'),
+    'Inpatient Medication Chart': ('inpatient_med_chart_id', 'inpatient_med_chart_csn_id', 'inpatient_med_chart_text'),
+    'Hospice': ('hospice_id', 'hospice_csn_id', 'hospice_text'),
+    'Hospice Plan of Care': ('hospice_plan_of_care_id', 'hospice_plan_of_care_csn_id', 'hospice_plan_of_care_text'),
+    'Hospice Non-Covered': ('hospice_non_covered_id', 'hospice_non_covered_csn_id', 'hospice_non_covered_text'),
+    'OR Post-Procedure Note': ('or_post_procedure_id', 'or_post_procedure_csn_id', 'or_post_procedure_text'),
+    'Peri-OP': ('peri_op_id', 'peri_op_csn_id', 'peri_op_text'),
+    'Treatment Plan': ('treatment_plan_id', 'treatment_plan_csn_id', 'treatment_plan_text'),
+    'Delivery': ('delivery_id', 'delivery_csn_id', 'delivery_text'),
+    'Brief Op Note': ('brief_op_note_id', 'brief_op_note_csn_id', 'brief_op_note_text'),
+    'Operative Report': ('operative_report_id', 'operative_report_csn_id', 'operative_report_text'),
+    'Scanned Form': ('scanned_form_id', 'scanned_form_csn_id', 'scanned_form_text'),
+    'Therapy Evaluation': ('therapy_evaluation_id', 'therapy_evaluation_csn_id', 'therapy_evaluation_text'),
+    'Therapy Treatment': ('therapy_treatment_id', 'therapy_treatment_csn_id', 'therapy_treatment_text'),
+    'Therapy Discharge': ('therapy_discharge_id', 'therapy_discharge_csn_id', 'therapy_discharge_text'),
+    'Therapy Progress Note': ('therapy_progress_note_id', 'therapy_progress_note_csn_id', 'therapy_progress_note_text'),
+    'Wound Care': ('wound_care_id', 'wound_care_csn_id', 'wound_care_text'),
+    'Anesthesia Post Evaluation': ('anesthesia_post_eval_id', 'anesthesia_post_eval_csn_id', 'anesthesia_post_eval_text'),
+    'Query': ('query_id', 'query_csn_id', 'query_text'),
+    'Anesthesia Post-Op Follow-up Note': ('anesthesia_postop_followup_id', 'anesthesia_postop_followup_csn_id', 'anesthesia_postop_followup_text'),
+    'Anesthesia Handoff': ('anesthesia_handoff_id', 'anesthesia_handoff_csn_id', 'anesthesia_handoff_text'),
+    'Anesthesia PAT Evaluation': ('anesthesia_pat_eval_id', 'anesthesia_pat_eval_csn_id', 'anesthesia_pat_eval_text'),
+    'Anesthesiology': ('anesthesiology_id', 'anesthesiology_csn_id', 'anesthesiology_text'),
+    'ED Attestation Note': ('ed_attestation_note_id', 'ed_attestation_note_csn_id', 'ed_attestation_note_text'),
+    'ED Procedure Note': ('ed_procedure_note_id', 'ed_procedure_note_csn_id', 'ed_procedure_note_text'),
+    'ED Re-evaluation Note': ('ed_reeval_note_id', 'ed_reeval_note_csn_id', 'ed_reeval_note_text'),
+    'CDU Provider Note': ('cdu_provider_note_id', 'cdu_provider_note_csn_id', 'cdu_provider_note_text'),
 }
 
 
 def query_clarity_for_account(account_id):
     """
     Query Clarity for clinical notes for a single account.
-    Returns dict with patient info and ALL notes for each of 14 clinical note types.
+    Returns dict with patient info and ALL notes for each of 47 clinical note types.
     Notes are concatenated chronologically with timestamps.
     """
     print(f"  Querying Clarity for account {account_id}...")
@@ -310,7 +343,19 @@ def query_clarity_for_account(account_id):
         'Progress Notes', 'Consults', 'H&P', 'Discharge Summary',
         'ED Notes', 'Initial Assessments', 'ED Triage Notes', 'ED Provider Notes',
         'Addendum Note', 'Hospital Course', 'Subjective & Objective',
-        'Assessment & Plan Note', 'Nursing Note', 'Code Documentation'
+        'Assessment & Plan Note', 'Nursing Note', 'Code Documentation',
+        'Anesthesia Preprocedure Evaluation', 'Anesthesia Postprocedure Evaluation',
+        'H&P (View-Only)', 'Internal H&P Note', 'Anesthesia Procedure Notes',
+        'L&D Delivery Note', 'Pre-Procedure Assessment', 'Inpatient Medication Chart',
+        'Hospice', 'Hospice Plan of Care', 'Hospice Non-Covered',
+        'OR Post-Procedure Note', 'Peri-OP', 'Treatment Plan', 'Delivery',
+        'Brief Op Note', 'Operative Report', 'Scanned Form',
+        'Therapy Evaluation', 'Therapy Treatment',
+        'Therapy Discharge', 'Therapy Progress Note', 'Wound Care',
+        'Anesthesia Post Evaluation', 'Query', 'Anesthesia Post-Op Follow-up Note',
+        'Anesthesia Handoff', 'Anesthesia PAT Evaluation', 'Anesthesiology',
+        'ED Attestation Note', 'ED Procedure Note', 'ED Re-evaluation Note',
+        'CDU Provider Note'
       )
     GROUP BY nte.ip_note_type, nte.note_id, nte.note_csn_id, nte.contact_date, nte.ent_inst_local_dttm
     ORDER BY nte.contact_date ASC, nte.ent_inst_local_dttm ASC
@@ -403,11 +448,8 @@ Return a structured summary with timestamps. Be thorough but concise.'''
 
 
 def extract_clinical_data(note_text, note_type):
-    """Extract clinically relevant data with timestamps from a long clinical note."""
+    """Extract clinically relevant data with timestamps from a clinical note."""
     if not note_text or note_text == "No Note Available":
-        return note_text
-
-    if len(note_text) < NOTE_EXTRACTION_THRESHOLD:
         return note_text
 
     try:
@@ -427,11 +469,11 @@ def extract_clinical_data(note_text, note_type):
 
     except Exception as e:
         print(f"    Warning: Extraction failed for {note_type}: {e}")
-        return note_text[:NOTE_EXTRACTION_THRESHOLD] + "\n\n[Note truncated]"
+        return note_text
 
 
 def extract_notes_for_case(clinical_data):
-    """Extract clinical data from all long notes for a case."""
+    """Extract clinical data from all notes for a case."""
     note_types = {
         "discharge_summary": ("discharge_summary_text", "Discharge Summary"),
         "hp_note": ("hp_note_text", "History & Physical"),
@@ -447,6 +489,39 @@ def extract_notes_for_case(clinical_data):
         "assessment_plan": ("assessment_plan_text", "Assessment & Plan Note"),
         "nursing_note": ("nursing_note_text", "Nursing Note"),
         "code_documentation": ("code_documentation_text", "Code Documentation"),
+        "anesthesia_preprocedure": ("anesthesia_preprocedure_text", "Anesthesia Preprocedure Evaluation"),
+        "anesthesia_postprocedure": ("anesthesia_postprocedure_text", "Anesthesia Postprocedure Evaluation"),
+        "hp_view_only": ("hp_view_only_text", "H&P (View-Only)"),
+        "internal_hp_note": ("internal_hp_note_text", "Internal H&P Note"),
+        "anesthesia_procedure": ("anesthesia_procedure_text", "Anesthesia Procedure Notes"),
+        "ld_delivery_note": ("ld_delivery_note_text", "L&D Delivery Note"),
+        "pre_procedure_assessment": ("pre_procedure_assessment_text", "Pre-Procedure Assessment"),
+        "inpatient_med_chart": ("inpatient_med_chart_text", "Inpatient Medication Chart"),
+        "hospice": ("hospice_text", "Hospice"),
+        "hospice_plan_of_care": ("hospice_plan_of_care_text", "Hospice Plan of Care"),
+        "hospice_non_covered": ("hospice_non_covered_text", "Hospice Non-Covered"),
+        "or_post_procedure": ("or_post_procedure_text", "OR Post-Procedure Note"),
+        "peri_op": ("peri_op_text", "Peri-OP"),
+        "treatment_plan": ("treatment_plan_text", "Treatment Plan"),
+        "delivery": ("delivery_text", "Delivery"),
+        "brief_op_note": ("brief_op_note_text", "Brief Op Note"),
+        "operative_report": ("operative_report_text", "Operative Report"),
+        "scanned_form": ("scanned_form_text", "Scanned Form"),
+        "therapy_evaluation": ("therapy_evaluation_text", "Therapy Evaluation"),
+        "therapy_treatment": ("therapy_treatment_text", "Therapy Treatment"),
+        "therapy_discharge": ("therapy_discharge_text", "Therapy Discharge"),
+        "therapy_progress_note": ("therapy_progress_note_text", "Therapy Progress Note"),
+        "wound_care": ("wound_care_text", "Wound Care"),
+        "anesthesia_post_eval": ("anesthesia_post_eval_text", "Anesthesia Post Evaluation"),
+        "query": ("query_text", "Query"),
+        "anesthesia_postop_followup": ("anesthesia_postop_followup_text", "Anesthesia Post-Op Follow-up Note"),
+        "anesthesia_handoff": ("anesthesia_handoff_text", "Anesthesia Handoff"),
+        "anesthesia_pat_eval": ("anesthesia_pat_eval_text", "Anesthesia PAT Evaluation"),
+        "anesthesiology": ("anesthesiology_text", "Anesthesiology"),
+        "ed_attestation_note": ("ed_attestation_note_text", "ED Attestation Note"),
+        "ed_procedure_note": ("ed_procedure_note_text", "ED Procedure Note"),
+        "ed_reeval_note": ("ed_reeval_note_text", "ED Re-evaluation Note"),
+        "cdu_provider_note": ("cdu_provider_note_text", "CDU Provider Note"),
     }
 
     extracted_notes = {}
@@ -455,17 +530,20 @@ def extract_notes_for_case(clinical_data):
     for key, (col_name, display_name) in note_types.items():
         note_text = clinical_data.get(col_name, "No Note Available")
         if note_text and note_text != "No Note Available":
-            if len(note_text) >= NOTE_EXTRACTION_THRESHOLD:
-                notes_to_extract.append((key, col_name, display_name, note_text))
-            else:
-                extracted_notes[key] = note_text
+            notes_to_extract.append((key, col_name, display_name, note_text))
         else:
             extracted_notes[key] = "Not available"
 
     if notes_to_extract:
-        print(f"  Extracting from {len(notes_to_extract)} long notes...")
-        for key, col_name, display_name, note_text in notes_to_extract:
-            extracted_notes[key] = extract_clinical_data(note_text, display_name)
+        print(f"  Extracting from {len(notes_to_extract)} notes in parallel...")
+        with ThreadPoolExecutor(max_workers=len(notes_to_extract)) as executor:
+            futures = {
+                executor.submit(extract_clinical_data, note_text, display_name): key
+                for key, col_name, display_name, note_text in notes_to_extract
+            }
+            for future in as_completed(futures):
+                key = futures[future]
+                extracted_notes[key] = future.result()
 
     return extracted_notes
 

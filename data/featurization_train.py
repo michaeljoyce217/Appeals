@@ -508,7 +508,7 @@ def extract_propel_summary(condition_name, definition_text):
     Extract key clinical criteria from a Propel definition using LLM.
     Returns a concise summary suitable for inclusion in prompts.
     """
-    if not definition_text or len(definition_text) < 100:
+    if not definition_text:
         return definition_text
 
     prompt = PROPEL_EXTRACTION_PROMPT.format(

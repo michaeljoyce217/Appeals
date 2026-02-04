@@ -435,7 +435,7 @@
                     <span class="label">Time Reduction Per Letter</span>
                 </div>
                 <div class="kpi-card">
-                    <span class="number">14</span>
+                    <span class="number">47</span>
                     <span class="label">Clinical Note Types</span>
                 </div>
                 <div class="kpi-card">
@@ -452,7 +452,7 @@
             <ul>
                 <li><strong>Vector Search:</strong> Finds the most similar past denial using embeddings - matches proven winning arguments to new cases</li>
                 <li><strong>Default Template Fallback:</strong> When no good match is found, uses a default template as structural guide</li>
-                <li><strong>Comprehensive Clinical Evidence:</strong> Synthesizes physician notes (14 types - clinical judgment) with structured data (labs, vitals, meds - objective measurements), detecting conflicts between them</li>
+                <li><strong>Comprehensive Clinical Evidence:</strong> Synthesizes physician notes (47 types - clinical judgment) with structured data (labs, vitals, meds - objective measurements), detecting conflicts between them</li>
                 <li><strong>Smart Propel Integration:</strong> LLM extracts key criteria from Propel PDFs into concise summaries for prompts</li>
                 <li><strong>Validation Checkpoints:</strong> Built-in checks verify paths, tables, and generation results at each step</li>
                 <li><strong>Built In-House:</strong> No vendor lock-in, full control over improvements and expansion</li>
@@ -571,7 +571,7 @@
                     <h4>Per-Case Data Prep (featurization_inference.py)</h4>
                     <p>
                         Gathers all data for a single case: parses the denial PDF, extracts account ID/payor/DRGs via LLM,
-                        queries Clarity for <strong>14 clinical note types</strong> and <strong>structured data</strong>
+                        queries Clarity for <strong>47 clinical note types</strong> and <strong>structured data</strong>
                         (labs, vitals, meds), extracts key clinical data with timestamps, and
                         <strong>detects conflicts</strong> between physician notes and structured data.
                     </p>
@@ -609,7 +609,7 @@
                 </div>
                 <div class="benefit-card">
                     <div class="icon">&#128196;</div>
-                    <h4>14 Clinical Note Types</h4>
+                    <h4>47 Clinical Note Types</h4>
                     <p>Progress Notes, Consults, H&P, Discharge Summary, ED Notes, Nursing Notes, and more from Clarity</p>
                 </div>
                 <div class="benefit-card">
@@ -904,7 +904,7 @@
 │   │  │ 3. CLINICAL     │  │ 4. STRUCTURED   │  │                 │  │                   │
 │   │  │    NOTES        │  │    DATA         │  │                 │  │                   │
 │   │  │                 │  │                 │  │                 │  │                   │
-│   │  │ 14 note types:  │  │ • Labs          │  │ 5. DIAGNOSES    │  │                   │
+│   │  │ 47 note types:  │  │ • Labs          │  │ 5. DIAGNOSES    │  │                   │
 │   │  │ Progress, H&P,  │  │ • Vitals        │  │    (DX records) │  │                   │
 │   │  │ Discharge, ED,  │  │ • Medications   │  │                 │  │                   │
 │   │  │ Consults, etc.  │  │                 │  │                 │  │                   │
@@ -1008,7 +1008,7 @@
                 </tr>
                 <tr>
                     <td><strong>Physician Notes</strong></td>
-                    <td>14 clinical note types from Clarity</td>
+                    <td>47 clinical note types from Clarity</td>
                     <td>PRIMARY - Clinical judgment and interpretation</td>
                 </tr>
                 <tr>
@@ -1057,7 +1057,7 @@
                 <h4>Per Case: 4-18 LLM Calls (POC) / 3-17 (Production)</h4>
                 <p>
                     <strong>POC Minimum (4 calls):</strong> Parser + Extraction (account_id) + Writer + Assessment<br>
-                    <strong>POC Maximum (18 calls):</strong> Parser + Extraction + Writer + Assessment + 14 Note extractions<br>
+                    <strong>POC Maximum (18 calls):</strong> Parser + Extraction + Writer + Assessment + 47 Note extractions<br>
                     <strong>Production:</strong> 3-17 calls (workqueue provides account_id, no Extraction Agent needed)<br>
                     <strong>Typical:</strong> ~6-9 calls per case (parser, extraction*, writer, assessment, 3-6 note extractions)<br>
                     <strong>With Structured Data**:</strong> +1 call per case for labs/vitals/meds extraction
@@ -1156,7 +1156,7 @@
                     <td>5. Query Clarity</td>
                     <td>account_id</td>
                     <td>Spark SQL query</td>
-                    <td>14 clinical note types</td>
+                    <td>47 clinical note types</td>
                 </tr>
                 <tr>
                     <td>6. Extract Notes</td>
@@ -1324,7 +1324,7 @@
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
                 <tr>
-                    <td>Clarity clinical notes (14 types)</td>
+                    <td>Clarity clinical notes (47 types)</td>
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
                 <tr>
