@@ -37,7 +37,6 @@ SEPSIS/
 │   ├── plans/                        # Design documents
 │   ├── rebuttal-engine-overview.html # Technical overview (tabbed, detailed)
 │   └── appeals-team-overview.html    # Simplified overview for appeals team
-├── compare_denials.py                # Utility: check for duplicate denials
 ├── test_queries.sql                  # Validation queries for Unity Catalog
 ├── README.md                         # Project documentation
 └── claude.md                         # This file (master prompt)
