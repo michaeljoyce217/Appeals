@@ -1,6 +1,6 @@
 # Sepsis Appeal Engine - Master Prompt
 
-**Last Updated:** 2026-02-04
+**Last Updated:** 2026-02-10
 **Repo:** https://github.com/michaeljoyce217/SEPSIS
 
 ---
@@ -71,8 +71,10 @@ All data gathering for a single case. **Writes to case tables for inference.py t
 | 3. Query Clinical Notes | Spark SQL | Get ALL notes from 47 types from Epic Clarity |
 | 4. Extract Clinical Notes | GPT-4.1 (parallel) | Extract SOFA components + clinical data with timestamps |
 | 5. Query Structured Data | Spark SQL | Get labs, vitals, meds, diagnoses from Clarity |
+| 5.5. Calculate SOFA Scores | Python (deterministic) | Programmatic SOFA scoring from raw labs/vitals/meds — zero LLM calls |
+| 5.7. Numeric Cross-Check | GPT-4.1 + Python | Extract numeric claims from notes, compare against raw structured data |
 | 6. Extract Structured Summary | GPT-4.1 | Summarize sepsis-relevant data with diagnosis descriptions |
-| 7. Detect Conflicts | GPT-4.1 | Compare notes vs structured data for discrepancies |
+| 7. Detect Conflicts | GPT-4.1 | Compare notes vs structured data for discrepancies (includes numeric mismatches) |
 | 8. Write Case Tables | Spark SQL | Write all outputs to case tables |
 
 ### Generation: inference.py
@@ -104,7 +106,8 @@ Reads prepared data from case tables (run featurization_inference.py first):
 | `fudgesicle_case_denial` | Denial text, embedding, payor, DRGs, is_sepsis flag |
 | `fudgesicle_case_clinical` | Patient info + extracted clinical notes (JSON) |
 | `fudgesicle_case_structured_summary` | LLM summary of structured data |
-| `fudgesicle_case_conflicts` | Detected conflicts + recommendation |
+| `fudgesicle_case_sofa_scores` | Programmatic SOFA scores per organ system (JSON), total score, vasopressor detail |
+| `fudgesicle_case_conflicts` | Detected conflicts + recommendation (includes numeric mismatches) |
 
 ### Intermediate Data (populated by featurization_inference.py)
 
@@ -132,15 +135,21 @@ Progress Notes, Consults, H&P, Discharge Summary, ED Notes, Initial Assessments,
 
 **Note:** ALL notes from the encounter are retrieved (not just most recent), concatenated chronologically with timestamps.
 
-### SOFA Score Extraction
-Note extraction prioritizes organ dysfunction data for quantifying sepsis severity:
-- **Respiration:** PaO2/FiO2 ratio, oxygen requirements
-- **Coagulation:** Platelet count
-- **Liver:** Bilirubin
-- **Cardiovascular:** MAP, vasopressor use with doses
-- **CNS:** GCS (Glasgow Coma Scale)
-- **Renal:** Creatinine, urine output
-- **Plus:** Lactate trends, infection evidence, antibiotic timing
+### Programmatic SOFA Scoring
+SOFA scores are calculated deterministically from raw structured data (zero LLM calls). The calculator reads directly from `fudgesicle_labs`, `fudgesicle_vitals`, and `fudgesicle_meds` tables, applies standard SOFA thresholds, and outputs per-organ scores with source values and timestamps:
+- **Respiration:** PaO2/FiO2 ratio (closest-in-time pairing)
+- **Coagulation:** Worst platelet count
+- **Liver:** Worst total bilirubin
+- **Cardiovascular:** MAP + vasopressor-based scoring (dopamine, dobutamine, epinephrine, norepinephrine dose thresholds)
+- **CNS:** GCS (Glasgow Coma Scale) — uses FLO_MEAS_ID '1525'
+- **Renal:** Worst creatinine
+
+When SOFA total >= 2, a formatted table is included in the appeal letter (rendered programmatically in DOCX, not by the LLM). The LLM references the pre-computed scores narratively but does not recalculate.
+
+### SOFA Score Extraction (Notes)
+Note extraction still prioritizes organ dysfunction data for qualitative clinical context:
+- Lactate trends, infection evidence, antibiotic timing
+- Physician assessments of sepsis severity
 
 ### Structured Data Summary
 Labs, vitals, and medications are queried from Clarity and summarized by LLM for sepsis-relevant data:
@@ -162,7 +171,16 @@ All clinical notes are extracted via LLM in parallel (ThreadPoolExecutor) to pul
 Compares physician notes vs structured data to identify discrepancies:
 - Note says "MAP maintained >65" but vitals show MAP <65
 - Note says "lactate normalized" but labs show lactate still elevated
-- Conflicts appear in DOCX appendix for CDI review
+- **Numeric cross-check:** LLM extracts all numeric claims from notes, then Python compares each against the closest-in-time raw value (>10% relative difference for continuous values, exact match for integer scales like GCS)
+- Conflicts (including numeric mismatches) appear in DOCX appendix for CDI review
+
+### Assertion-Only Language
+The writer prompt enforces strict language rules to prevent giving payors anything to seize on:
+- Every sentence must advance the argument — state what IS documented, never what is missing
+- Forbidden phrases: "although", "despite", "however", "only", "merely", "may/might/could" and any hedging, minimizing, or conceding language
+- Never concede any point from the denial letter — refute or ignore, never agree
+- If data for a parameter is absent, it is omitted entirely — never mentioned or hedged
+- Every paragraph must contain at least one specific clinical value with timestamp
 
 ### Appeal Strength Assessment
 After letter generation, an LLM evaluates the appeal and produces:
@@ -231,11 +249,13 @@ Based on Azure OpenAI GPT-4.1 standard pricing ($2.20/1M input, $8.80/1M output)
 |------|-------------|---------------|------|
 | Denial info extraction | ~4,000 | ~100 | $0.01 |
 | Note extraction (~20 calls avg, parallel) | ~50,000 | ~12,000 | $0.22 |
+| SOFA calculation | 0 | 0 | $0.00 |
+| Numeric cross-check | ~5,000 | ~1,500 | $0.02 |
 | Structured data extraction | ~8,000 | ~1,500 | $0.03 |
 | Conflict detection | ~6,000 | ~500 | $0.02 |
 | Appeal letter generation | ~60,000 | ~3,000 | $0.16 |
 | Strength assessment | ~15,000 | ~800 | $0.04 |
-| **Total** | ~143,000 | ~17,900 | **~$0.48** |
+| **Total** | ~148,000 | ~19,400 | **~$0.50** |
 
 Note: 47 note types are queried but ~20 typically have content for a given sepsis case. All extractions run in parallel so wall-clock time is similar to a single call.
 

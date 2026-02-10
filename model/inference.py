@@ -65,6 +65,7 @@ PROPEL_DATA_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_propel_data"
 CASE_DENIAL_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_denial"
 CASE_CLINICAL_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_clinical"
 CASE_STRUCTURED_SUMMARY_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_structured_summary"
+CASE_SOFA_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_sofa_scores"
 CASE_CONFLICTS_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_conflicts"
 
 print(f"Catalog: {trgt_cat}")
@@ -229,6 +230,26 @@ def load_case_data():
         print(f"  WARNING: Could not load structured summary: {e}")
         case_data["structured_summary"] = "No structured data available."
 
+    # Load SOFA scores
+    print("\nLoading SOFA scores...")
+    try:
+        sofa_row = spark.sql(f"SELECT * FROM {CASE_SOFA_TABLE}").collect()
+        if sofa_row:
+            row = sofa_row[0]
+            case_data["sofa_scores"] = {
+                "total_score": row["total_score"],
+                "organs_scored": row["organs_scored"],
+                "organ_scores": json.loads(row["organ_scores"]) if row["organ_scores"] else {},
+                "vasopressor_detail": json.loads(row["vasopressor_detail"]) if row["vasopressor_detail"] else [],
+            }
+            print(f"  SOFA total: {case_data['sofa_scores']['total_score']} ({case_data['sofa_scores']['organs_scored']} organs)")
+        else:
+            print("  No SOFA scores found")
+            case_data["sofa_scores"] = None
+    except Exception as e:
+        print(f"  WARNING: Could not load SOFA scores: {e}")
+        case_data["sofa_scores"] = None
+
     # Load conflicts
     print("\nLoading conflicts...")
     try:
@@ -292,8 +313,42 @@ else:
             return None, 0.0
 
     # =============================================================================
-    # CELL 6: Writer Prompt
+    # CELL 6: Writer Prompt & SOFA Formatting
     # =============================================================================
+
+    ORGAN_DISPLAY_NAMES = {
+        "respiratory": "Respiratory (PaO2/FiO2)",
+        "coagulation": "Coagulation (Platelets)",
+        "liver": "Liver (Bilirubin)",
+        "cardiovascular": "Cardiovascular",
+        "cns": "CNS (GCS)",
+        "renal": "Renal (Creatinine)",
+    }
+
+    def format_sofa_for_prompt(sofa_data):
+        """Format SOFA scores as a markdown table for prompt inclusion."""
+        if not sofa_data or sofa_data["total_score"] < 2:
+            return "SOFA score < 2 or unavailable. Do not include a SOFA table in the letter."
+
+        lines = []
+        lines.append("PRE-COMPUTED SOFA SCORES (verified from raw data — do not recalculate):")
+        lines.append("")
+        lines.append("| Organ System | Score | Value | Timestamp |")
+        lines.append("|---|---|---|---|")
+        for organ_key in ["respiratory", "coagulation", "liver", "cardiovascular", "cns", "renal"]:
+            if organ_key in sofa_data["organ_scores"]:
+                data = sofa_data["organ_scores"][organ_key]
+                display = ORGAN_DISPLAY_NAMES.get(organ_key, organ_key)
+                lines.append(f"| {display} | {data['score']} | {data['value']} | {data.get('timestamp', 'N/A')} |")
+        lines.append(f"| **TOTAL** | **{sofa_data['total_score']}** | {sofa_data['organs_scored']} organs scored | |")
+        lines.append("")
+
+        if sofa_data.get("vasopressor_detail"):
+            drugs = set(v["drug"] for v in sofa_data["vasopressor_detail"])
+            lines.append(f"Vasopressors administered: {', '.join(sorted(drugs))}")
+
+        return "\n".join(lines)
+
     WRITER_PROMPT = '''You are a clinical coding expert writing a DRG validation appeal letter for Mercy Hospital.
 
 # Original Denial Letter
@@ -304,6 +359,9 @@ else:
 
 # Structured Data Summary (SUPPORTING EVIDENCE - from labs, vitals, meds)
 {structured_data_summary}
+
+# Computed SOFA Scores
+{sofa_scores_section}
 
 # Official Clinical Definition
 {clinical_definition_section}
@@ -325,12 +383,40 @@ Payor: {payor}
 {gold_letter_instructions}
 1. READ THE DENIAL LETTER - extract the payor address, reviewer name, claim numbers
 2. ADDRESS EACH DENIAL ARGUMENT - quote the payer, then refute
-3. CITE CLINICAL EVIDENCE from provider notes FIRST, then structured data
-4. INCLUDE TIMESTAMPS with clinical values
-5. QUANTIFY ORGAN DYSFUNCTION using SOFA criteria when available:
-   - Reference specific values: lactate, MAP, creatinine, platelets, bilirubin, GCS, PaO2/FiO2
-   - Example: "Patient demonstrated cardiovascular dysfunction with MAP of 63 requiring vasopressor support"
+3. CITE CLINICAL EVIDENCE - cite physician notes FIRST as primary evidence, then supporting structured data values
+4. INCLUDE TIMESTAMPS with every clinical value cited
+5. SOFA SCORING:
+   - If the pre-computed SOFA table is provided above (total >= 2), include it in the letter body
+   - Reference the scores narratively when arguing organ dysfunction
+   - Do NOT recalculate scores — use the pre-computed values exactly as provided
+   - If no SOFA table is provided, omit any SOFA table from the letter
 6. Follow the Mercy Hospital template structure exactly
+
+# LANGUAGE RULES (MANDATORY)
+These rules are non-negotiable. Every sentence in the letter must comply.
+
+CORE PRINCIPLE: The payor will scrutinize every word. Never give them anything to seize on. Only state facts that support the appeal.
+
+ASSERTION-ONLY: Every sentence must advance the argument. State what IS documented, not what is missing.
+
+FORBIDDEN PHRASES — do NOT use any of these patterns:
+- "although" / "while" / "despite" / "however" / "nonetheless"
+- "despite the lack of" / "despite the absence of"
+- "while X was not documented" / "while X is not available"
+- "unfortunately" / "regrettably"
+- "only" / "merely" / "just" (minimizing qualifiers)
+- "may" / "might" / "could possibly" / "potentially" (hedging verbs)
+- Any sentence that acknowledges missing data, absent documentation, or unavailable information
+- Any sentence that concedes a point the payor made in the denial
+- Any qualifier that minimizes or softens a clinical finding
+
+RULES:
+1. If data for a parameter is absent, OMIT IT ENTIRELY. Never mention it. Never hedge.
+2. Never concede any argument from the denial letter — refute or ignore, never agree.
+3. Frame every clinical finding assertively: "Lactate was 4.2 mmol/L" not "Lactate was elevated at 4.2 mmol/L, though it later improved."
+4. Do not qualify severity — let the clinical values speak for themselves.
+
+EVIDENCE DENSITY: Every paragraph in the clinical argument must contain at least one specific clinical value with its timestamp.
 
 Return ONLY the letter text.'''
 
@@ -354,6 +440,9 @@ Return ONLY the letter text.'''
 
 ═══ STRUCTURED DATA SUMMARY ═══
 {structured_summary}
+
+═══ COMPUTED SOFA SCORES ═══
+{sofa_scores_text}
 
 ═══ GENERATED APPEAL LETTER ═══
 {generated_letter}
@@ -390,7 +479,8 @@ Return ONLY valid JSON in this format:
 
 
     def assess_appeal_strength(generated_letter, propel_definition, denial_text,
-                               extracted_notes, gold_letter_text, structured_summary):
+                               extracted_notes, gold_letter_text, structured_summary,
+                               sofa_data=None):
         """Assess the strength of a generated appeal letter."""
         print("  Running strength assessment...")
 
@@ -401,6 +491,9 @@ Return ONLY valid JSON in this format:
                 truncated = content[:2000] + "..." if len(content) > 2000 else content
                 notes_summary.append(f"## {note_type}\n{truncated}")
         extracted_clinical_data = "\n\n".join(notes_summary) if notes_summary else "No clinical notes available"
+
+        # Format SOFA scores for assessment
+        sofa_scores_text = format_sofa_for_prompt(sofa_data) if sofa_data else "SOFA scores not available"
 
         try:
             response = openai_client.chat.completions.create(
@@ -413,6 +506,7 @@ Return ONLY valid JSON in this format:
                         gold_letter_text=gold_letter_text[:3000] if gold_letter_text else "No gold letter template used",
                         extracted_clinical_data=extracted_clinical_data,
                         structured_summary=structured_summary[:3000] if structured_summary else "No structured data",
+                        sofa_scores_text=sofa_scores_text,
                         generated_letter=generated_letter
                     )}
                 ],
@@ -548,11 +642,15 @@ Return ONLY valid JSON in this format:
             clinical_notes_parts.append(f"## {display_name}\n{note_content}")
     clinical_notes_section = "\n\n".join(clinical_notes_parts) if clinical_notes_parts else "No clinical notes available."
 
+    # Format SOFA scores for prompt
+    sofa_scores_section = format_sofa_for_prompt(case_data.get("sofa_scores"))
+
     # Build prompt
     writer_prompt = WRITER_PROMPT.format(
         denial_letter_text=case_data["denial_text"],
         clinical_notes_section=clinical_notes_section,
         structured_data_summary=structured_summary,
+        sofa_scores_section=sofa_scores_section,
         clinical_definition_section=clinical_definition_section,
         gold_letter_section=gold_letter_section,
         gold_letter_instructions=gold_letter_instructions,
@@ -589,7 +687,8 @@ Return ONLY valid JSON in this format:
 
     assessment = assess_appeal_strength(
         letter_text, propel_def, case_data["denial_text"],
-        extracted_notes, gold_text, structured_summary
+        extracted_notes, gold_text, structured_summary,
+        sofa_data=case_data.get("sofa_scores")
     )
 
     # -------------------------------------------------------------------------
@@ -598,7 +697,7 @@ Return ONLY valid JSON in this format:
     if EXPORT_TO_DOCX:
         print("\nStep 4: Exporting to DOCX...")
         from docx import Document
-        from docx.shared import Pt
+        from docx.shared import Pt, Inches
 
         def add_markdown_paragraph(doc, text):
             """Add paragraph with markdown bold converted to Word bold."""
@@ -661,6 +760,51 @@ Return ONLY valid JSON in this format:
             doc.add_paragraph("─" * 55)
 
         doc.add_paragraph()
+
+        # SOFA Score Table (programmatic, deterministic - part of the appeal body)
+        sofa_data = case_data.get("sofa_scores")
+        if sofa_data and sofa_data.get("total_score", 0) >= 2:
+            sofa_header = doc.add_paragraph()
+            sofa_header.add_run("SOFA Score Summary").bold = True
+            sofa_header.paragraph_format.space_after = Pt(4)
+
+            organ_order = ["respiratory", "coagulation", "liver", "cardiovascular", "cns", "renal"]
+            # Count organs with data
+            organs_with_data = [o for o in organ_order if o in sofa_data["organ_scores"]]
+
+            table = doc.add_table(rows=1 + len(organs_with_data) + 1, cols=4, style='Table Grid')
+            # Header row
+            hdr = table.rows[0]
+            for i, text in enumerate(["Organ System", "Score", "Value", "Timestamp"]):
+                hdr.cells[i].text = text
+                for run in hdr.cells[i].paragraphs[0].runs:
+                    run.bold = True
+
+            # Data rows (only organs with data)
+            row_idx = 1
+            for organ_key in organ_order:
+                if organ_key not in sofa_data["organ_scores"]:
+                    continue
+                data = sofa_data["organ_scores"][organ_key]
+                display = ORGAN_DISPLAY_NAMES.get(organ_key, organ_key)
+                row = table.rows[row_idx]
+                row.cells[0].text = display
+                row.cells[1].text = str(data["score"])
+                row.cells[2].text = str(data.get("value", ""))
+                row.cells[3].text = str(data.get("timestamp", ""))[:19] if data.get("timestamp") else ""
+                row_idx += 1
+
+            # Total row
+            total_row = table.rows[row_idx]
+            total_row.cells[0].text = "TOTAL"
+            total_row.cells[1].text = str(sofa_data["total_score"])
+            total_row.cells[2].text = f"{sofa_data['organs_scored']} organs scored"
+            total_row.cells[3].text = ""
+            for cell in total_row.cells:
+                for run in cell.paragraphs[0].runs:
+                    run.bold = True
+
+            doc.add_paragraph()
 
         # Letter content
         for paragraph in letter_text.split('\n\n'):
