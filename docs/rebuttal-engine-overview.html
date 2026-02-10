@@ -390,6 +390,26 @@
             color: var(--mercy-blue);
         }
 
+        .new-badge {
+            display: inline-block;
+            background: #e85a30;
+            color: white;
+            padding: 0.15rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 0.5rem;
+            vertical-align: middle;
+            animation: pulse 2s ease-in-out 3;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
         @media (max-width: 768px) {
             header h1 {
                 font-size: 1.8rem;
@@ -572,7 +592,9 @@
                     <p>
                         Gathers all data for a single case: parses the denial PDF, extracts account ID/payor/DRGs via LLM,
                         queries Clarity for <strong>47 clinical note types</strong> and <strong>structured data</strong>
-                        (labs, vitals, meds), extracts key clinical data with timestamps, and
+                        (labs, vitals, meds), extracts key clinical data with timestamps,
+                        <strong>calculates SOFA scores deterministically</strong> from raw data,
+                        performs a <strong>numeric cross-check</strong> of note values against structured data, and
                         <strong>detects conflicts</strong> between physician notes and structured data.
                     </p>
                 </div>
@@ -670,6 +692,27 @@
             </div>
 
             <div class="callout">
+                <h4>Programmatic SOFA Scoring <span class="new-badge">New</span></h4>
+                <p>
+                    SOFA scores are now calculated <strong>deterministically from raw labs, vitals, and medications</strong> with
+                    zero LLM calls. The calculator reads raw structured data tables, applies standard SOFA thresholds, and outputs
+                    per-organ scores with source values and timestamps. When the total SOFA score is &ge; 2, a formatted table is
+                    rendered programmatically in the DOCX (not by the LLM). Covers all six organ systems:
+                </p>
+                <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
+                    <li><strong>Respiratory:</strong> PaO2/FiO2 ratio</li>
+                    <li><strong>Coagulation:</strong> Platelets</li>
+                    <li><strong>Liver:</strong> Bilirubin</li>
+                    <li><strong>Cardiovascular:</strong> MAP + vasopressor dosing</li>
+                    <li><strong>CNS:</strong> GCS (Glasgow Coma Scale)</li>
+                    <li><strong>Renal:</strong> Creatinine</li>
+                </ul>
+                <p style="margin-top: 0.5rem;">
+                    This ensures SOFA scoring is reproducible, auditable, and immune to LLM hallucination.
+                </p>
+            </div>
+
+            <div class="callout">
                 <h4>Conservative DRG Extraction</h4>
                 <p>
                     The denial parser only extracts DRG codes if they are <strong>explicitly stated as numbers</strong>
@@ -702,6 +745,28 @@
                 <p style="margin-top: 0.5rem;">
                     Conflicts are flagged in an appendix of the DOCX output for CDI reviewer attention. The writer
                     uses physician notes as primary evidence while structured data provides objective support.
+                </p>
+            </div>
+
+            <div class="callout">
+                <h4>Numeric Cross-Check <span class="new-badge">New</span></h4>
+                <p>
+                    An LLM extracts all numeric clinical values from the concatenated notes, then Python compares each
+                    value against the closest-in-time raw value from structured data. Mismatches are flagged when there is
+                    a <strong>&gt;10% relative difference</strong> for continuous values or an <strong>exact mismatch</strong>
+                    for integer scales (e.g., GCS). Flagged mismatches are merged into the existing conflicts pipeline and
+                    appear in the DOCX conflicts appendix alongside other discrepancies.
+                </p>
+            </div>
+
+            <div class="callout important">
+                <h4>Assertion-Only Language <span class="new-badge">New</span></h4>
+                <p>
+                    The writer prompt enforces strict language rules: every sentence must advance the argument, never
+                    acknowledge missing data, never concede points to the payor, and never hedge. Forbidden phrases include
+                    "although", "despite", "however", "only", "merely", "may/might/could". If data is absent, it is
+                    omitted entirely and never mentioned. This ensures each appeal letter reads as a confident, unqualified
+                    assertion of medical necessity.
                 </p>
             </div>
 
@@ -754,6 +819,8 @@
 │                                                                             │
 │  [Denial PDF] ──► Parse & Extract Info ──► Query Clinical Notes            │
 │                                       ──► Query Structured Data             │
+│                                       ──► Calculate SOFA Scores             │
+│                                       ──► Numeric Cross-Check               │
 │                                       ──► Detect Conflicts                  │
 └─────────────────────────────────────────────────────────────────────────────┘
 
@@ -763,7 +830,7 @@
 │  Step 1: Vector search for best gold letter                                 │
 │  Step 2: Generate appeal (LLM: gold letter + notes + structured data)       │
 │  Step 3: Assess strength (LLM: Propel criteria, evidence quality)           │
-│  Step 4: Export to DOCX (includes conflicts appendix if any)                │
+│  Step 4: Export to DOCX (SOFA table + conflicts appendix if any)            │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 [DOCX Letter] ──► CDI Review ──► Approved Letter ──► Send to Payor</div>
@@ -917,8 +984,23 @@
 │   │      char notes)    │  │     SUMMARY (LLM)   │                                      │
 │   │  → clinical_notes   │  │  → structured_data  │                                      │
 │   └─────────┬───────────┘  └─────────┬───────────┘                                      │
+│             │                        │                                                  │
+│             │                        ▼                                                  │
+│   ┌─────────│─────────────────────────────────────────────────────────┐                  │
+│   │         │  7b. CALCULATE SOFA SCORES (deterministic, zero LLM)    │                  │
+│   │         │      Apply standard thresholds to raw labs/vitals/meds  │                  │
+│   │         │   → sofa_scores (per-organ + total)                     │                  │
+│   └─────────│─────────────────────────────────────────────────────────┘                  │
+│             │                        │                                                  │
 │             └───────────┬────────────┘                                                  │
 │                         ▼                                                               │
+│   ┌─────────────────────────────────────────────────────────────────┐                   │
+│   │  7c. NUMERIC CROSS-CHECK                                        │                   │
+│   │      LLM extracts numeric values from notes                     │                   │
+│   │      Python compares against closest-in-time raw structured data│                   │
+│   │   → numeric_mismatches (merged into conflicts)                  │                   │
+│   └─────────┬───────────────────────────────────────────────────────┘                   │
+│             ▼                                                                           │
 │   ┌─────────────────────────────────────────────────────────────────┐                   │
 │   │  8. DETECT CONFLICTS                                             │                   │
 │   │     Compare physician notes vs structured data                   │                   │
@@ -926,7 +1008,8 @@
 │   │  → conflicts                                                     │                   │
 │   └─────────────────────────────────────────────────────────────────┘                   │
 │                                                                                         │
-│   OUTPUT: denial_text, denial_info, clinical_notes, structured_data, conflicts          │
+│   OUTPUT: denial_text, denial_info, clinical_notes, structured_data,                    │
+│           sofa_scores, numeric_mismatches, conflicts                                    │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────────────────────────┐
@@ -965,6 +1048,7 @@
 │   │  4. EXPORT DOCX                                                  │                   │
 │   │     • Assessment section (for CDI reviewer)                     │                   │
 │   │     • Appeal letter body                                        │                   │
+│   │     • SOFA score table (if total >= 2, rendered programmatically)│                   │
 │   │     • Conflicts appendix (if any discrepancies detected)        │                   │
 │   └─────────────────────────────────────────────────────────────────┘                   │
 │                                                                                         │
@@ -1103,6 +1187,18 @@
                     <td>$0.03</td>
                 </tr>
                 <tr>
+                    <td>SOFA calculation</td>
+                    <td>0</td>
+                    <td>0</td>
+                    <td>$0.00 (deterministic)</td>
+                </tr>
+                <tr>
+                    <td>Numeric cross-check</td>
+                    <td>~5,000</td>
+                    <td>~1,500</td>
+                    <td>$0.02</td>
+                </tr>
+                <tr>
                     <td>Conflict detection</td>
                     <td>~6,000</td>
                     <td>~500</td>
@@ -1110,9 +1206,9 @@
                 </tr>
                 <tr>
                     <td><strong>Total per letter</strong></td>
-                    <td>~100,000</td>
-                    <td>~9,100</td>
-                    <td><strong>~$0.30</strong></td>
+                    <td>~105,000</td>
+                    <td>~10,600</td>
+                    <td><strong>~$0.50</strong></td>
                 </tr>
             </table>
             <p style="font-size: 0.9rem; color: #666; margin-top: 0.5rem;">
@@ -1169,6 +1265,18 @@
                     <td>Labs/vitals/meds timeline</td>
                     <td>GPT-4.1 extraction</td>
                     <td>SOFA components, bundle compliance</td>
+                </tr>
+                <tr>
+                    <td>6c. SOFA Calculation</td>
+                    <td>Raw labs/vitals/meds</td>
+                    <td>Deterministic (no LLM)</td>
+                    <td>Per-organ scores + total SOFA</td>
+                </tr>
+                <tr>
+                    <td>6d. Numeric Cross-Check</td>
+                    <td>Notes + raw structured data</td>
+                    <td>GPT-4.1 extraction + Python comparison</td>
+                    <td>Numeric mismatches (merged into conflicts)</td>
                 </tr>
                 <tr>
                     <td>7. Generate</td>
@@ -1275,13 +1383,13 @@
             <h3>Investment Profile</h3>
             <ul>
                 <li><strong>Infrastructure cost:</strong> $0 incremental (uses existing Databricks/Azure)</li>
-                <li><strong>LLM cost:</strong> ~$0.30 per letter (Azure OpenAI GPT-4.1, with structured data + conflict detection)</li>
+                <li><strong>LLM cost:</strong> ~$0.50 per letter (Azure OpenAI GPT-4.1, with structured data, SOFA scoring, numeric cross-check + conflict detection)</li>
                 <li><strong>One-time setup:</strong> &lt;$1 (gold letter + Propel ingestion)</li>
                 <li><strong>Monthly cost examples:</strong>
                     <ul>
-                        <li>100 appeals/month: ~$30</li>
-                        <li>500 appeals/month: ~$150</li>
-                        <li>1,000 appeals/month: ~$300</li>
+                        <li>100 appeals/month: ~$50</li>
+                        <li>500 appeals/month: ~$250</li>
+                        <li>1,000 appeals/month: ~$500</li>
                     </ul>
                 </li>
                 <li><strong>Development:</strong> Internal Financial Data Science team</li>
@@ -1333,6 +1441,18 @@
                 </tr>
                 <tr>
                     <td>Conflict detection</td>
+                    <td><span class="status-badge ready">Complete</span></td>
+                </tr>
+                <tr>
+                    <td>Programmatic SOFA scoring <span class="new-badge">New</span></td>
+                    <td><span class="status-badge ready">Complete</span></td>
+                </tr>
+                <tr>
+                    <td>Numeric cross-check <span class="new-badge">New</span></td>
+                    <td><span class="status-badge ready">Complete</span></td>
+                </tr>
+                <tr>
+                    <td>Assertion-only language rules <span class="new-badge">New</span></td>
                     <td><span class="status-badge ready">Complete</span></td>
                 </tr>
                 <tr>
@@ -1401,7 +1521,7 @@
 
     <footer>
         <p>Sepsis Appeal Engine | Mercy Hospital | Financial Data Science Team</p>
-        <p>Executive Overview | January 2026</p>
+        <p>Executive Overview | February 2026</p>
     </footer>
 
     <script>

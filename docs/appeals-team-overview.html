@@ -239,6 +239,26 @@
             color: #666;
             font-size: 0.9rem;
         }
+
+        .new-badge {
+            display: inline-block;
+            background: #e85a30;
+            color: white;
+            padding: 0.15rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 0.5rem;
+            vertical-align: middle;
+            animation: pulse 2s ease-in-out 3;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
     </style>
 </head>
 <body>
@@ -283,6 +303,8 @@
    │  • Extract clinical data from notes (PRIMARY)           │
    │  • Summarize structured data (SUPPORTING)               │
    │  • Detect conflicts between notes and data              │
+   │  • Calculate SOFA scores from raw data                  │
+   │  • Cross-check numeric values in notes vs data          │
    │  • Find best-matching past winning appeal               │
    └─────────────────────────────────────────────────────────┘
          │
@@ -301,7 +323,8 @@
    │                                                         │
    │  1. Strength Assessment (internal review)               │
    │  2. Conflicts Appendix (if any detected)                │
-   │  3. Draft Appeal Letter                                 │
+   │  3. SOFA Score Table (when applicable)                  │
+   │  4. Draft Appeal Letter                                 │
    └─────────────────────────────────────────────────────────┘
          │
          ▼
@@ -401,6 +424,17 @@
             <strong>CONFLICT:</strong> Note says "no vasopressors needed" but medication records show norepinephrine administration
         </div>
 
+        <h3>Numeric Mismatches <span class="new-badge">New</span></h3>
+        <p>
+            The system also extracts every numeric value mentioned in physician notes and cross-checks it against the raw structured data.
+            If a number in the notes does not match the corresponding value in the data, it is flagged as a NUMERIC MISMATCH.
+            A threshold of >10% is used for continuous values (labs, vitals); exact match is required for scales like GCS.
+        </p>
+
+        <div class="conflict-example">
+            <strong>NUMERIC MISMATCH:</strong> lactate - Notes claim 2.1 (at 03/15/2024 08:00), but raw data shows 4.2 (at 2024-03-15 08:15:00)
+        </div>
+
         <h3>What to Do When You See Conflicts</h3>
         <div class="highlight">
             <h4>CDI Reviewer Action Required</h4>
@@ -457,7 +491,12 @@
         </div>
 
         <div class="input-box">
-            <h4>5. Propel Criteria</h4>
+            <h4>5. SOFA Scores (Calculated Automatically) <span class="new-badge">New</span></h4>
+            <p>SOFA scores are computed programmatically from the raw labs, vitals, and medications — zero AI involvement. Each organ system (Respiratory, Coagulation, Liver, Cardiovascular, CNS, Renal) receives a score based on the actual data values. When the total SOFA score is 2 or higher, a clean table is included in the letter showing each organ system's score, the value used, and the timestamp.</p>
+        </div>
+
+        <div class="input-box">
+            <h4>6. Propel Criteria</h4>
             <p>The official clinical definition of sepsis that we use to justify the diagnosis.</p>
         </div>
     </section>
@@ -466,10 +505,11 @@
         <h2>What Comes Out</h2>
 
         <div class="output-box">
-            <h4>A Word Document with Three Parts:</h4>
+            <h4>A Word Document with Four Parts:</h4>
             <ol>
                 <li><strong>Strength Assessment</strong> - A score (1-10) rating how strong the appeal is, with notes on what evidence is present vs. missing</li>
-                <li><strong>Conflicts Appendix</strong> (if any) - Flags where physician notes don't match structured data, requiring your review before sending</li>
+                <li><strong>Conflicts Appendix</strong> (if any, including numeric mismatches) - Flags where physician notes don't match structured data, requiring your review before sending</li>
+                <li><strong>SOFA Score Table</strong> (when total score >= 2) - A table showing each organ system's score, the value used, and the timestamp, calculated deterministically from raw data</li>
                 <li><strong>The Appeal Letter</strong> - A complete draft addressing the denial arguments with clinical evidence, citing notes first, then supporting data</li>
             </ol>
         </div>
@@ -513,13 +553,29 @@
         <div class="step">
             <div class="step-number">5</div>
             <div class="step-content">
-                <h4>Generate the Appeal</h4>
-                <p>Writes the letter citing physician notes first as primary evidence, then structured data as support. Uses the winning template and Propel criteria.</p>
+                <h4>Cross-Check Numbers <span class="new-badge">New</span></h4>
+                <p>Extracts every numeric value mentioned in physician notes and compares it against the raw structured data. Flags mismatches exceeding 10% for continuous values (labs, vitals) or any mismatch for scales like GCS.</p>
             </div>
         </div>
 
         <div class="step">
             <div class="step-number">6</div>
+            <div class="step-content">
+                <h4>Calculate SOFA Scores <span class="new-badge">New</span></h4>
+                <p>Computes SOFA scores deterministically from the raw labs, vitals, and medications — no AI involved. When the total score is 2 or higher, a table is included in the letter showing each organ system's score, the value used, and the timestamp.</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-number">7</div>
+            <div class="step-content">
+                <h4>Generate the Appeal</h4>
+                <p>Writes the letter citing physician notes first as primary evidence, then structured data as support. Uses the winning template and Propel criteria. Uses assertion-only language — every sentence states facts supporting the appeal, never acknowledging missing data or conceding points.</p>
+            </div>
+        </div>
+
+        <div class="step">
+            <div class="step-number">8</div>
             <div class="step-content">
                 <h4>Assess Strength</h4>
                 <p>Evaluates the letter and scores what evidence is strong vs. what might be missing.</p>
@@ -537,6 +593,7 @@
                 <li>Verify the clinical facts are accurate</li>
                 <li>Check that the arguments make sense for this case</li>
                 <li><strong>Review any flagged conflicts before sending</strong></li>
+                <li>Check the SOFA score table against your clinical knowledge</li>
                 <li>Ensure the notes-first, data-second hierarchy makes sense</li>
                 <li>Edit as needed before sending</li>
             </ul>
@@ -552,6 +609,7 @@
             <ul>
                 <li>Verify the timing of notes vs. data</li>
                 <li>Edit the letter to address the discrepancy</li>
+                <li>Review any NUMERIC MISMATCH flags — these indicate a number in the notes doesn't match the raw data</li>
                 <li>Query the physician for clarification</li>
                 <li>Decide whether to proceed with the appeal</li>
             </ul>
@@ -566,6 +624,9 @@
             <li><strong>Complete evidence</strong> - Pulls ALL notes from the encounter plus labs, vitals, meds</li>
             <li><strong>Evidence hierarchy</strong> - Properly cites clinical judgment first, objective data second</li>
             <li><strong>Conflict detection</strong> - Flags discrepancies between notes and data before you send</li>
+            <li><strong>SOFA scoring</strong> <span class="new-badge">New</span> - Deterministic organ dysfunction scoring from raw data, included as a table in the letter</li>
+            <li><strong>Numeric verification</strong> <span class="new-badge">New</span> - Cross-checks every number in the notes against raw data</li>
+            <li><strong>Assertion-only language</strong> <span class="new-badge">New</span> - Never gives the payor anything negative to seize on</li>
             <li><strong>You stay in control</strong> - Every letter reviewed before sending</li>
         </ul>
     </section>
