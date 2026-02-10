@@ -741,6 +741,18 @@ Return ONLY valid JSON in this format:
             p = doc.add_paragraph(line)
             p.paragraph_format.space_after = Pt(0)
 
+        # SOFA status note in internal review
+        sofa_data = case_data.get("sofa_scores")
+        if not sofa_data:
+            sofa_note = doc.add_paragraph()
+            sofa_note.add_run("SOFA Table: ").bold = True
+            sofa_note.add_run("Not included — insufficient structured data to calculate SOFA scores for this encounter.")
+        elif sofa_data.get("total_score", 0) < 2:
+            sofa_note = doc.add_paragraph()
+            sofa_note.add_run("SOFA Table: ").bold = True
+            sofa_note.add_run(f"Not included — total SOFA score is {sofa_data['total_score']} (below threshold of 2). "
+                              f"{sofa_data.get('organs_scored', 0)} organ system(s) scored.")
+
         doc.add_paragraph("═" * 55)
 
         # Conflicts appendix (if any)
