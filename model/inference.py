@@ -511,7 +511,7 @@ Return ONLY valid JSON in this format:
                     )}
                 ],
                 temperature=0,
-                max_tokens=2000
+                max_tokens=4000
             )
 
             raw_response = response.choices[0].message.content.strip()
