@@ -559,14 +559,14 @@ Return ONLY valid JSON in this format:
         lines.append(f"PROPEL CRITERIA: {propel.get('score', '?')}/10")
         for finding in propel.get("findings", []):
             symbol = status_symbols.get(finding.get("status", ""), "?")
-            lines.append(f"  {symbol} {finding.get('item', '')[:50]}")
+            lines.append(f"  {symbol} {finding.get('item', '')}")
 
         # Argument Structure
         argument = assessment.get("argument_structure", {})
         lines.append(f"\nARGUMENT STRUCTURE: {argument.get('score', '?')}/10")
         for finding in argument.get("findings", []):
             symbol = status_symbols.get(finding.get("status", ""), "?")
-            lines.append(f"  {symbol} {finding.get('item', '')[:50]}")
+            lines.append(f"  {symbol} {finding.get('item', '')}")
 
         # Evidence Quality
         evidence = assessment.get("evidence_quality", {})
@@ -575,11 +575,11 @@ Return ONLY valid JSON in this format:
         lines.append(f"\nEVIDENCE - Clinical Notes: {clinical.get('score', '?')}/10")
         for finding in clinical.get("findings", []):
             symbol = status_symbols.get(finding.get("status", ""), "?")
-            lines.append(f"  {symbol} {finding.get('item', '')[:48]}")
+            lines.append(f"  {symbol} {finding.get('item', '')}")
         lines.append(f"\nEVIDENCE - Structured Data: {structured.get('score', '?')}/10")
         for finding in structured.get("findings", []):
             symbol = status_symbols.get(finding.get("status", ""), "?")
-            lines.append(f"  {symbol} {finding.get('item', '')[:48]}")
+            lines.append(f"  {symbol} {finding.get('item', '')}")
 
         lines.append("─" * 55)
         return "\n".join(lines)
