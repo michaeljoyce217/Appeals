@@ -331,7 +331,7 @@ else:
             return "SOFA score < 2 or unavailable. Do not include a SOFA table in the letter."
 
         lines = []
-        lines.append("PRE-COMPUTED SOFA SCORES (verified from raw data — do not recalculate):")
+        lines.append("SOFA SCORES (calculated from raw clinical data):")
         lines.append("")
         lines.append("| Organ System | Score | Value | Timestamp |")
         lines.append("|---|---|---|---|")
@@ -386,10 +386,10 @@ Payor: {payor}
 3. CITE CLINICAL EVIDENCE - cite physician notes FIRST as primary evidence, then supporting structured data values
 4. INCLUDE TIMESTAMPS with every clinical value cited
 5. SOFA SCORING:
-   - If the pre-computed SOFA table is provided above (total >= 2), include it in the letter body
-   - Reference the scores narratively when arguing organ dysfunction
-   - Do NOT recalculate scores — use the pre-computed values exactly as provided
-   - If no SOFA table is provided, omit any SOFA table from the letter
+   - If SOFA scores are provided above (total >= 2), reference them narratively when arguing organ dysfunction
+   - Cite the individual organ scores and total score as clinical evidence of organ dysfunction severity
+   - Do NOT include a SOFA table in the letter text — the table is rendered separately in the document
+   - If no SOFA scores are provided, do not mention SOFA scoring
 6. Follow the Mercy Hospital template structure exactly
 
 # LANGUAGE RULES (MANDATORY)
@@ -761,15 +761,21 @@ Return ONLY valid JSON in this format:
 
         doc.add_paragraph()
 
-        # SOFA Score Table (programmatic, deterministic - part of the appeal body)
+        # Letter content
+        for paragraph in letter_text.split('\n\n'):
+            if paragraph.strip():
+                p = add_markdown_paragraph(doc, paragraph.strip())
+                p.paragraph_format.space_after = Pt(12)
+
+        # SOFA Score Table (programmatic, deterministic - placed after letter body)
         sofa_data = case_data.get("sofa_scores")
         if sofa_data and sofa_data.get("total_score", 0) >= 2:
+            doc.add_paragraph()
             sofa_header = doc.add_paragraph()
-            sofa_header.add_run("SOFA Score Summary").bold = True
+            sofa_header.add_run("Appendix: SOFA Score Summary").bold = True
             sofa_header.paragraph_format.space_after = Pt(4)
 
             organ_order = ["respiratory", "coagulation", "liver", "cardiovascular", "cns", "renal"]
-            # Count organs with data
             organs_with_data = [o for o in organ_order if o in sofa_data["organ_scores"]]
 
             table = doc.add_table(rows=1 + len(organs_with_data) + 1, cols=4, style='Table Grid')
@@ -803,14 +809,6 @@ Return ONLY valid JSON in this format:
             for cell in total_row.cells:
                 for run in cell.paragraphs[0].runs:
                     run.bold = True
-
-            doc.add_paragraph()
-
-        # Letter content
-        for paragraph in letter_text.split('\n\n'):
-            if paragraph.strip():
-                p = add_markdown_paragraph(doc, paragraph.strip())
-                p.paragraph_format.space_after = Pt(12)
 
         # Save
         patient_name = case_data.get('patient_name', 'Unknown')
