@@ -85,7 +85,9 @@ WRITER_SCORING_INSTRUCTIONS = ""
 # REQUIRED: Assessment Labels
 # =============================================================================
 
-# Labels used in the assessment prompt
+# Labels used in the assessment prompt.
+# The assessment evaluates propel_criteria ONLY against the Propel definition text —
+# it will not infer additional criteria from other evidence sources.
 ASSESSMENT_CONDITION_LABEL = ""   # e.g., "respiratory failure DRG appeal letter"
 ASSESSMENT_CRITERIA_LABEL = ""    # e.g., "PROPEL RESPIRATORY FAILURE CRITERIA"
 

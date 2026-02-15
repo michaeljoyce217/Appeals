@@ -428,6 +428,11 @@ Evaluate this appeal letter and provide:
 2. SUMMARY (2-3 sentences)
 3. DETAILED BREAKDOWN with scores and specific findings
 
+SCOPING RULES — each dimension evaluates against a SPECIFIC source:
+- propel_criteria: ONLY criteria explicitly stated in the criteria definition section above (the first ═══ section). Do NOT infer additional criteria from clinical evidence, denial letters, gold letters, or general medical knowledge. If a criterion is not written in the Propel definition, it does not belong in this section.
+- argument_structure: How well the letter rebuts the denial and follows the gold letter template structure.
+- evidence_quality: Whether clinical notes and structured data are cited with specific values and timestamps.
+
 Return ONLY valid JSON in this format:
 {{
   "overall_score": <1-10>,

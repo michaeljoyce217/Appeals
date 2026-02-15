@@ -242,7 +242,9 @@ After letter generation, an LLM evaluates the appeal and produces:
 
 Each finding is marked ✓ present, △ could strengthen, or ✗ missing. The "missing" items in Evidence Quality flag specific data points that weren't cited in the letter.
 
-Assessment appears in DOCX before the letter body for CDI reviewer reference. Includes SOFA status note when the SOFA table is omitted.
+**Scoping Rules:** Each assessment dimension is explicitly constrained to evaluate against its designated evidence source. The `propel_criteria` dimension evaluates ONLY against criteria stated in the Propel definition — the LLM is instructed not to infer additional criteria from clinical evidence, denial letters, gold letters, or general medical knowledge. This prevents "bleed" where the assessor flags items that weren't actually in the Propel input.
+
+Assessment appears in DOCX before the letter body for CDI reviewer reference. Includes clinical scores status note when the scores table is omitted.
 
 ### Conservative DRG Extraction
 Parser only extracts DRG codes if explicitly stated as numbers in the denial letter. Returns "Unknown" rather than hallucinating plausible codes.
