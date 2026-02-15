@@ -46,6 +46,10 @@ NOTE_EXTRACTION_TARGETS = ""
 # REQUIRED: Structured Data Context
 # =============================================================================
 
+# Example diagnosis names to include in the structured data prompt preamble.
+# Helps the LLM understand the format of DX_NAME values for this condition.
+DIAGNOSIS_EXAMPLES = ""  # e.g., 'For example:\n- "Acute respiratory failure with hypoxia"\n'
+
 # Instructions for the structured data extraction LLM about what to prioritize.
 # This replaces the condition-specific portion of the structured data extraction prompt.
 STRUCTURED_DATA_CONTEXT = ""

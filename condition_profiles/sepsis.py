@@ -56,6 +56,11 @@ NOTE_EXTRACTION_TARGETS = """## SOFA Score Components (PRIORITY - extract ALL av
 # =============================================================================
 # Structured Data Context (for structured data extraction prompt)
 # =============================================================================
+DIAGNOSIS_EXAMPLES = """For example:
+- "Severe sepsis with septic shock due to Methicillin-susceptible Staphylococcus aureus"
+- "Sepsis due to Escherichia coli"
+"""
+
 STRUCTURED_DATA_CONTEXT = """Extract a focused summary of sepsis-relevant clinical data from this timeline. Prioritize:
 
 1. **SOFA Score Components** (with timestamps and trends):

@@ -964,11 +964,12 @@ print("Numeric cross-check functions loaded")
 # CELL 7: Structured Data Extraction (LLM)
 # =============================================================================
 
+_diagnosis_examples = getattr(profile, 'DIAGNOSIS_EXAMPLES', '')
+
 STRUCTURED_DATA_EXTRACTION_PROMPT = '''You are a clinical data analyst extracting condition-relevant information from structured EHR data.
 
 **Context on Diagnosis Records:**
-The diagnosis names are the granular clinical descriptions from Epic's diagnosis dictionary. Quote these directly in appeals - they are the specific documented diagnoses.
-
+The diagnosis names are the granular clinical descriptions from Epic's diagnosis dictionary. Quote these directly in appeals - they are the specific documented diagnoses. {diagnosis_examples}
 Multiple diagnosis records may describe the same condition at different levels of specificity. Use the most specific documented diagnosis that is supported by clinical evidence.
 
 Diagnoses include timestamps - use these to understand if a condition is pre-existing (before admission) or documented during the encounter.
@@ -980,7 +981,10 @@ Diagnoses include timestamps - use these to understand if a condition is pre-exi
 {{structured_timeline}}
 
 **Output Format:**
-Provide a concise clinical summary (500-800 words) organized by the categories above, with specific timestamps and values. Flag any data gaps.'''.format(condition_context=profile.STRUCTURED_DATA_CONTEXT)
+Provide a concise clinical summary (500-800 words) organized by the categories above, with specific timestamps and values. Flag any data gaps.'''.format(
+    condition_context=profile.STRUCTURED_DATA_CONTEXT,
+    diagnosis_examples=_diagnosis_examples,
+)
 
 
 def extract_structured_data_summary(account_id):
