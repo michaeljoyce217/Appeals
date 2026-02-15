@@ -71,7 +71,7 @@ All data gathering for a single case. **Writes to case tables for inference.py t
 | Step | Technology | Function |
 |------|------------|----------|
 | 1. Parse Denial PDF | Azure AI Document Intelligence | OCR extraction from denial PDF |
-| 2. Extract Denial Info | GPT-4.1 | Extract: account_id, payor, DRGs, is_sepsis |
+| 2. Extract Denial Info | GPT-4.1 | Extract: account_id, payor, DRGs, condition relevance |
 | 3. Query Clinical Notes | Spark SQL | Get ALL notes from 47 types from Epic Clarity |
 | 4. Extract Clinical Notes | GPT-4.1 (parallel) | Extract SOFA components + clinical data with timestamps |
 | 5. Query Structured Data | Spark SQL | Get labs, vitals, meds, diagnoses from Clarity |

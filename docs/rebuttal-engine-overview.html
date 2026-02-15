@@ -771,18 +771,18 @@
             </div>
 
             <div class="callout success">
-                <h4>Appeal Strength Assessment</h4>
+                <h4>Appeal Strength Assessment (Scoped)</h4>
                 <p>
-                    After letter generation, an LLM evaluates the appeal and produces a comprehensive assessment:
+                    After letter generation, an LLM evaluates the appeal across three scoped dimensions:
                 </p>
                 <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
-                    <li><strong>Overall Score:</strong> 1-10 with LOW/MODERATE/HIGH rating</li>
-                    <li><strong>Summary:</strong> 2-3 sentences explaining the score</li>
-                    <li><strong>Detailed Breakdown:</strong> Scores three dimensions with specific findings</li>
+                    <li><strong>Propel Criteria:</strong> Evaluates ONLY against criteria in the Propel definition — does not infer criteria from other sources</li>
+                    <li><strong>Argument Structure:</strong> How well the letter rebuts the denial and follows the gold template structure</li>
+                    <li><strong>Evidence Quality:</strong> Whether clinical notes and structured data are cited with specific values and timestamps</li>
                 </ul>
                 <p style="margin-top: 0.5rem;">
                     Each dimension shows what's present (&#10003;), what could strengthen (&#9651;), or what's missing (&#10007;).
-                    Assessment appears in DOCX before the letter body for CDI reviewer reference.
+                    Overall score (1-10) with rating appears in DOCX before the letter body for CDI reviewer reference.
                 </p>
             </div>
 
@@ -829,8 +829,8 @@
 │                                                                             │
 │  Step 1: Vector search for best gold letter                                 │
 │  Step 2: Generate appeal (LLM: gold letter + notes + structured data)       │
-│  Step 3: Assess strength (LLM: Propel criteria, evidence quality)           │
-│  Step 4: Export to DOCX (SOFA table + conflicts appendix if any)            │
+│  Step 3: Assess strength (scoped: Propel criteria, structure, evidence)     │
+│  Step 4: Export to DOCX (clinical scores table + conflicts appendix)        │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 [DOCX Letter] ──► CDI Review ──► Approved Letter ──► Send to Payor</div>
@@ -961,7 +961,7 @@
 │   └─────────┬───────────┘                                                               │
 │             ▼                                                                           │
 │   ┌─────────────────────┐                                                               │
-│   │  2. EXTRACT INFO    │  GPT-4.1: account_id, payor, DRGs, is_sepsis                  │
+│   │  2. EXTRACT INFO    │  GPT-4.1: account_id, payor, DRGs, condition match             │
 │   │                     │  → denial_info                                                │
 │   └─────────┬───────────┘                                                               │
 │             ▼                                                                           │
@@ -1138,13 +1138,12 @@
 
             <h3>LLM Call Summary</h3>
             <div class="callout">
-                <h4>Per Case: 4-18 LLM Calls (POC) / 3-17 (Production)</h4>
+                <h4>Per Case: ~25 LLM Calls (typical)</h4>
                 <p>
-                    <strong>POC Minimum (4 calls):</strong> Parser + Extraction (account_id) + Writer + Assessment<br>
-                    <strong>POC Maximum (18 calls):</strong> Parser + Extraction + Writer + Assessment + 47 Note extractions<br>
-                    <strong>Production:</strong> 3-17 calls (workqueue provides account_id, no Extraction Agent needed)<br>
-                    <strong>Typical:</strong> ~6-9 calls per case (parser, extraction*, writer, assessment, 3-6 note extractions)<br>
-                    <strong>With Structured Data**:</strong> +1 call per case for labs/vitals/meds extraction
+                    <strong>Fixed calls (5):</strong> Parser + Structured Data Extraction + Numeric Cross-Check + Writer + Assessment<br>
+                    <strong>Variable calls (~20):</strong> Note extraction (47 types queried, ~20 have content, all run in parallel)<br>
+                    <strong>Deterministic (0 LLM):</strong> Clinical score calculation (e.g., SOFA) + Conflict detection comparison<br>
+                    <strong>Production savings:</strong> Workqueue provides account_id directly, eliminating 1 extraction call
                 </p>
             </div>
 
@@ -1163,31 +1162,13 @@
                     <td>$0.01</td>
                 </tr>
                 <tr>
-                    <td>Note extraction (4 calls avg)</td>
+                    <td>Note extraction (~20 calls avg, parallel)</td>
+                    <td>~50,000</td>
                     <td>~12,000</td>
-                    <td>~3,200</td>
-                    <td>$0.05</td>
+                    <td>$0.22</td>
                 </tr>
                 <tr>
-                    <td>Structured data extraction**</td>
-                    <td>~8,000</td>
-                    <td>~1,500</td>
-                    <td>$0.03</td>
-                </tr>
-                <tr>
-                    <td>Appeal letter generation</td>
-                    <td>~55,000</td>
-                    <td>~3,000</td>
-                    <td>$0.15</td>
-                </tr>
-                <tr>
-                    <td>Strength assessment</td>
-                    <td>~12,000</td>
-                    <td>~800</td>
-                    <td>$0.03</td>
-                </tr>
-                <tr>
-                    <td>SOFA calculation</td>
+                    <td>Clinical score calculation</td>
                     <td>0</td>
                     <td>0</td>
                     <td>$0.00 (deterministic)</td>
@@ -1199,21 +1180,39 @@
                     <td>$0.02</td>
                 </tr>
                 <tr>
+                    <td>Structured data extraction</td>
+                    <td>~8,000</td>
+                    <td>~1,500</td>
+                    <td>$0.03</td>
+                </tr>
+                <tr>
                     <td>Conflict detection</td>
                     <td>~6,000</td>
                     <td>~500</td>
                     <td>$0.02</td>
                 </tr>
                 <tr>
+                    <td>Appeal letter generation</td>
+                    <td>~60,000</td>
+                    <td>~3,000</td>
+                    <td>$0.16</td>
+                </tr>
+                <tr>
+                    <td>Strength assessment</td>
+                    <td>~15,000</td>
+                    <td>~1,500</td>
+                    <td>$0.05</td>
+                </tr>
+                <tr>
                     <td><strong>Total per letter</strong></td>
-                    <td>~105,000</td>
-                    <td>~10,600</td>
+                    <td>~148,000</td>
+                    <td>~20,100</td>
                     <td><strong>~$0.50</strong></td>
                 </tr>
             </table>
             <p style="font-size: 0.9rem; color: #666; margin-top: 0.5rem;">
                 <em>Based on Azure OpenAI GPT-4.1 standard pricing: $2.20/1M input, $8.80/1M output</em><br>
-                <em>**Now integrated into featurization_inference.py - runs automatically for every case.</em>
+                <em>47 note types queried but ~20 typically have content. All extractions run in parallel.</em>
             </p>
 
             <h3>Data Flow (Per Letter)</h3>
@@ -1240,7 +1239,7 @@
                     <td>3. Parse Denial</td>
                     <td>Raw denial text</td>
                     <td>GPT-4.1 structured extraction</td>
-                    <td>payor, DRGs, is_sepsis</td>
+                    <td>payor, DRGs, condition match</td>
                 </tr>
                 <tr>
                     <td>4. Vector Search</td>
@@ -1264,7 +1263,7 @@
                     <td>6b. Extract Structured**</td>
                     <td>Labs/vitals/meds timeline</td>
                     <td>GPT-4.1 extraction</td>
-                    <td>SOFA components, bundle compliance</td>
+                    <td>Clinical scores, bundle compliance</td>
                 </tr>
                 <tr>
                     <td>6c. SOFA Calculation</td>
@@ -1502,18 +1501,20 @@
 
             <h3>Expansion Potential</h3>
             <div class="callout success">
-                <h4>Beyond Sepsis</h4>
+                <h4>Beyond Sepsis — Condition Profile Architecture</h4>
                 <p>
-                    The architecture is denial-type agnostic. Adding support for pneumonia,
-                    CHF, or other clinical validation denials requires:
+                    The base engine is now fully condition-agnostic. All condition-specific logic lives in
+                    pluggable <strong>condition profiles</strong> (<code>condition_profiles/&lt;condition&gt;.py</code>).
+                    Adding support for a new condition (e.g., respiratory failure) requires:
                 </p>
                 <ul>
+                    <li>Creating a condition profile from <code>TEMPLATE.py</code> (config + optional clinical scorer)</li>
                     <li>Adding relevant Propel documentation to propel_data/</li>
-                    <li>Adding denial-type-specific gold letters</li>
-                    <li>Updating scope filter configuration</li>
+                    <li>Adding condition-specific gold letters</li>
+                    <li>Setting <code>CONDITION_PROFILE = "your_condition"</code> in each notebook</li>
                 </ul>
                 <p>
-                    No architectural changes needed - the same pipeline handles any denial type.
+                    No base engine changes needed — the same pipeline handles any condition type.
                 </p>
             </div>
         </section>

@@ -243,10 +243,10 @@
 │   │  PARSER AGENT       │  GPT-4.1 LLM                                                   │
 │   │                     │  • Extract: payor name                                         │
 │   │  "Structured Data   │  • Extract: original_drg, proposed_drg (only if explicit)     │
-│   │   Extraction"       │  • Classify: is_sepsis (true/false)                            │
+│   │   Extraction"       │  • Classify: condition match (true/false)                            │
 │   └─────────┬───────────┘                                                                │
 │             │                                                                            │
-│             │ payor, DRGs, is_sepsis                                                     │
+│             │ payor, DRGs, condition match                                                     │
 │             ▼                                                                            │
 │   ┌─────────────────────┐    ┌─────────────────────────────────────────────────┐         │
 │   │  EMBEDDING +        │◄───│  Gold Letter Library (Unity Catalog)             │         │
@@ -289,15 +289,15 @@
 │   │  STRUCTURED DATA    │◄───│  Clarity Structured │  (Separate script:                  │
 │   │  EXTRACTION**       │    │  Tables             │   structured_data_ingestion.py)     │
 │   │                     │    │  (fudgesicle_       │                                     │
-│   │  GPT-4.1 LLM        │    │   labs/vitals/meds/ │  Will be integrated into            │
-│   │                     │    │   procedures/icd10) │  featurization.py                   │
+│   │  GPT-4.1 LLM        │    │   labs/vitals/meds/ │  Integrated into            │
+│   │                     │    │   procedures/icd10) │  featurization_inference.py          │
 │   │  Extracts sepsis-   │    └─────────────────────┘                                     │
 │   │  relevant data from │                                                                │
 │   │  chronological      │                                                                │
 │   │  timeline           │                                                                │
 │   └─────────┬───────────┘                                                                │
 │             │                                                                            │
-│             │ Extracted structured data (SOFA components, bundle compliance, trends)     │
+│             │ Extracted structured data (Clinical scores, bundle compliance, trends)     │
 │             ▼                                                                            │
 │   ┌─────────────────────┐    ┌─────────────────────┐                                     │
 │   │  WRITER AGENT       │◄───│  Propel Criteria    │                                     │
@@ -360,7 +360,7 @@
                     <td><strong>Parser</strong></td>
                     <td>GPT-4.1</td>
                     <td>Extract structured fields from denial text</td>
-                    <td>payor, DRGs, is_sepsis</td>
+                    <td>payor, DRGs, condition match</td>
                 </tr>
                 <tr>
                     <td><strong>Embedding</strong></td>
@@ -384,7 +384,7 @@
                     <td><strong>Structured Data Extractor**</strong></td>
                     <td>GPT-4.1</td>
                     <td>Extract sepsis data from labs/vitals/meds timeline</td>
-                    <td>SOFA components, bundle compliance</td>
+                    <td>Clinical scores, bundle compliance</td>
                 </tr>
                 <tr>
                     <td><strong>Assessment</strong></td>
@@ -395,7 +395,7 @@
             </table>
             <p style="font-size: 0.85rem; color: #666; margin-top: -0.5rem;">
                 <em>*POC only: Extraction Agent extracts account_id from denial text. In production, workqueue provides this directly - Extraction Agent becomes unnecessary.</em><br>
-                <em>**Runs separately via structured_data_ingestion.py. Will be integrated into featurization.py.</em>
+                <em>**Now integrated into featurization_inference.py — runs automatically for every case.</em>
             </p>
 
             <h3>Why Multi-Agent Architecture?</h3>
@@ -424,13 +424,12 @@
 
             <h3>LLM Call Summary</h3>
             <div class="callout">
-                <h4>Per Case: 4-18 LLM Calls (POC) / 3-17 (Production)</h4>
+                <h4>Per Case: ~25 LLM Calls (typical)</h4>
                 <p>
-                    <strong>POC Minimum (4 calls):</strong> Parser + Extraction (account_id) + Writer + Assessment<br>
-                    <strong>POC Maximum (18 calls):</strong> Parser + Extraction + Writer + Assessment + 47 Note extractions<br>
-                    <strong>Production:</strong> 3-17 calls (workqueue provides account_id, no Extraction Agent needed)<br>
-                    <strong>Typical:</strong> ~6-9 calls per case (parser, extraction*, writer, assessment, 3-6 note extractions)<br>
-                    <strong>With Structured Data**:</strong> +1 call per case for labs/vitals/meds extraction
+                    <strong>Fixed calls (5):</strong> Parser + Structured Data Extraction + Numeric Cross-Check + Writer + Assessment<br>
+                    <strong>Variable calls (~20):</strong> Note extraction (47 types queried, ~20 have content, all run in parallel)<br>
+                    <strong>Deterministic (0 LLM):</strong> Clinical score calculation (e.g., SOFA) + Conflict detection comparison<br>
+                    <strong>Production savings:</strong> Workqueue provides account_id directly, eliminating 1 extraction call
                 </p>
             </div>
 
@@ -449,34 +448,52 @@
                     <td>$0.01</td>
                 </tr>
                 <tr>
-                    <td>Note extraction (4 calls avg)</td>
+                    <td>Note extraction (~20 calls avg, parallel)</td>
+                    <td>~50,000</td>
                     <td>~12,000</td>
-                    <td>~3,200</td>
-                    <td>$0.05</td>
+                    <td>$0.22</td>
                 </tr>
                 <tr>
-                    <td>Structured data extraction**</td>
+                    <td>Clinical score calculation</td>
+                    <td>0</td>
+                    <td>0</td>
+                    <td>$0.00 (deterministic)</td>
+                </tr>
+                <tr>
+                    <td>Numeric cross-check</td>
+                    <td>~5,000</td>
+                    <td>~1,500</td>
+                    <td>$0.02</td>
+                </tr>
+                <tr>
+                    <td>Structured data extraction</td>
                     <td>~8,000</td>
                     <td>~1,500</td>
                     <td>$0.03</td>
                 </tr>
                 <tr>
+                    <td>Conflict detection</td>
+                    <td>~6,000</td>
+                    <td>~500</td>
+                    <td>$0.02</td>
+                </tr>
+                <tr>
                     <td>Appeal letter generation</td>
-                    <td>~55,000</td>
+                    <td>~60,000</td>
                     <td>~3,000</td>
-                    <td>$0.15</td>
+                    <td>$0.16</td>
                 </tr>
                 <tr>
                     <td>Strength assessment</td>
-                    <td>~12,000</td>
-                    <td>~800</td>
-                    <td>$0.03</td>
+                    <td>~15,000</td>
+                    <td>~1,500</td>
+                    <td>$0.05</td>
                 </tr>
                 <tr>
                     <td><strong>Total per letter</strong></td>
-                    <td>~91,000</td>
-                    <td>~8,600</td>
-                    <td><strong>~$0.27</strong></td>
+                    <td>~148,000</td>
+                    <td>~20,100</td>
+                    <td><strong>~$0.50</strong></td>
                 </tr>
             </table>
             <p style="font-size: 0.9rem; color: #666; margin-top: 0.5rem;">
@@ -507,7 +524,7 @@
                     <td>3. Parse Denial</td>
                     <td>Raw denial text</td>
                     <td>GPT-4.1 structured extraction</td>
-                    <td>payor, DRGs, is_sepsis</td>
+                    <td>payor, DRGs, condition match</td>
                 </tr>
                 <tr>
                     <td>4. Vector Search</td>
@@ -531,7 +548,7 @@
                     <td>6b. Extract Structured**</td>
                     <td>Labs/vitals/meds timeline</td>
                     <td>GPT-4.1 extraction</td>
-                    <td>SOFA components, bundle compliance</td>
+                    <td>Clinical scores, bundle compliance</td>
                 </tr>
                 <tr>
                     <td>7. Generate</td>
@@ -554,7 +571,7 @@
             </table>
             <p style="font-size: 0.85rem; color: #666; margin-top: 0.5rem;">
                 <em>*POC only: Step 2 extracts account_id from denial text. In production, workqueue provides this directly - step is skipped.</em><br>
-                <em>**Runs separately via structured_data_ingestion.py. Will be integrated into featurization.py.</em>
+                <em>**Now integrated into featurization_inference.py — runs automatically for every case.</em>
             </p>
 
             <div class="callout success">
