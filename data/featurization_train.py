@@ -1,5 +1,5 @@
 # data/featurization_train.py
-# Sepsis Appeal Engine - Knowledge Base Setup (One-Time)
+# DRG Appeal Engine - Knowledge Base Setup (One-Time)
 #
 # ONE-TIME SETUP: Ingests gold standard letters and Propel definitions
 # into Unity Catalog tables. Run once, or when adding new gold letters.
@@ -27,6 +27,7 @@
 import os
 import re
 import uuid
+import importlib
 from datetime import datetime
 from pyspark.sql import SparkSession
 from pyspark.sql.types import (
@@ -35,6 +36,10 @@ from pyspark.sql.types import (
 )
 
 spark = SparkSession.builder.getOrCreate()
+
+# Condition profile — set to the condition being processed
+CONDITION_PROFILE = "sepsis"  # "sepsis", "respiratory_failure", etc.
+profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
 
 # Configuration
 EMBEDDING_MODEL = "text-embedding-ada-002"  # 1536 dimensions
@@ -52,9 +57,9 @@ else:
 GOLD_LETTERS_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_gold_letters"
 PROPEL_DATA_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_propel_data"
 
-# Paths
-GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals.gold_standard_appeals__sepsis_only"
-PROPEL_DATA_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/propel_data"
+# Paths (from condition profile)
+GOLD_LETTERS_PATH = profile.GOLD_LETTERS_PATH
+PROPEL_DATA_PATH = profile.PROPEL_DATA_PATH
 
 print(f"Catalog: {trgt_cat}")
 

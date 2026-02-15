@@ -1,5 +1,5 @@
 # model/inference.py
-# Sepsis Appeal Engine - Appeal Letter Generation
+# DRG Appeal Engine - Appeal Letter Generation
 #
 # GENERATION PIPELINE (reads prepared data from case tables):
 # 1. Load knowledge base (gold letters, Propel definitions)
@@ -30,20 +30,23 @@ import os
 import math
 import json
 import re
+import importlib
 from datetime import datetime
 from pyspark.sql import SparkSession
 
 spark = SparkSession.builder.getOrCreate()
 
+# Condition profile — set to the condition being processed
+CONDITION_PROFILE = "sepsis"  # "sepsis", "respiratory_failure", etc.
+profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
+
 # -----------------------------------------------------------------------------
-# Processing Configuration
+# Processing Configuration (from condition profile)
 # -----------------------------------------------------------------------------
-SCOPE_FILTER = "sepsis"
-SEPSIS_DRG_CODES = ["870", "871", "872"]
 MATCH_SCORE_THRESHOLD = 0.7
 
-# Default template path
-DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals_sepsis_only/default_sepsis_appeal_template.docx"
+# Default template path (from condition profile)
+DEFAULT_TEMPLATE_PATH = profile.DEFAULT_TEMPLATE_PATH
 
 # Output configuration
 EXPORT_TO_DOCX = True
@@ -65,10 +68,11 @@ PROPEL_DATA_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_propel_data"
 CASE_DENIAL_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_denial"
 CASE_CLINICAL_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_clinical"
 CASE_STRUCTURED_SUMMARY_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_structured_summary"
-CASE_SOFA_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_sofa_scores"
+CASE_SCORES_TABLE = f"{trgt_cat}.fin_ds.{profile.CLINICAL_SCORES_TABLE_NAME}" if profile.CLINICAL_SCORES_TABLE_NAME else None
 CASE_CONFLICTS_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_conflicts"
 
 print(f"Catalog: {trgt_cat}")
+print(f"Condition profile: {profile.CONDITION_DISPLAY_NAME}")
 
 # =============================================================================
 # CELL 2: Azure Credentials and Client
@@ -181,10 +185,10 @@ def load_case_data():
             case_data["payor"] = row["payor"]
             case_data["original_drg"] = row["original_drg"]
             case_data["proposed_drg"] = row["proposed_drg"]
-            case_data["is_sepsis"] = row["is_sepsis"]
+            case_data["is_condition_match"] = row["is_condition_match"]
             print(f"  Account: {case_data['account_id']}")
             print(f"  Payor: {case_data['payor']}")
-            print(f"  Sepsis: {case_data['is_sepsis']}")
+            print(f"  Condition match ({profile.CONDITION_DISPLAY_NAME}): {case_data['is_condition_match']}")
         else:
             print("  ERROR: No denial data found. Run featurization_inference.py first.")
             return None
@@ -230,25 +234,29 @@ def load_case_data():
         print(f"  WARNING: Could not load structured summary: {e}")
         case_data["structured_summary"] = "No structured data available."
 
-    # Load SOFA scores
-    print("\nLoading SOFA scores...")
-    try:
-        sofa_row = spark.sql(f"SELECT * FROM {CASE_SOFA_TABLE}").collect()
-        if sofa_row:
-            row = sofa_row[0]
-            case_data["sofa_scores"] = {
-                "total_score": row["total_score"],
-                "organs_scored": row["organs_scored"],
-                "organ_scores": json.loads(row["organ_scores"]) if row["organ_scores"] else {},
-                "vasopressor_detail": json.loads(row["vasopressor_detail"]) if row["vasopressor_detail"] else [],
-            }
-            print(f"  SOFA total: {case_data['sofa_scores']['total_score']} ({case_data['sofa_scores']['organs_scored']} organs)")
-        else:
-            print("  No SOFA scores found")
-            case_data["sofa_scores"] = None
-    except Exception as e:
-        print(f"  WARNING: Could not load SOFA scores: {e}")
-        case_data["sofa_scores"] = None
+    # Load clinical scores (condition-specific)
+    print("\nLoading clinical scores...")
+    if CASE_SCORES_TABLE:
+        try:
+            scores_row = spark.sql(f"SELECT * FROM {CASE_SCORES_TABLE}").collect()
+            if scores_row:
+                row = scores_row[0]
+                case_data["clinical_scores"] = {
+                    "total_score": row["total_score"],
+                    "organs_scored": row["organs_scored"],
+                    "organ_scores": json.loads(row["organ_scores"]) if row["organ_scores"] else {},
+                    "vasopressor_detail": json.loads(row["vasopressor_detail"]) if row["vasopressor_detail"] else [],
+                }
+                print(f"  Scores total: {case_data['clinical_scores']['total_score']} ({case_data['clinical_scores']['organs_scored']} organs)")
+            else:
+                print("  No clinical scores found")
+                case_data["clinical_scores"] = None
+        except Exception as e:
+            print(f"  WARNING: Could not load clinical scores: {e}")
+            case_data["clinical_scores"] = None
+    else:
+        print("  No clinical scorer configured for this condition")
+        case_data["clinical_scores"] = None
 
     # Load conflicts
     print("\nLoading conflicts...")
@@ -313,41 +321,8 @@ else:
             return None, 0.0
 
     # =============================================================================
-    # CELL 6: Writer Prompt & SOFA Formatting
+    # CELL 6: Writer Prompt
     # =============================================================================
-
-    ORGAN_DISPLAY_NAMES = {
-        "respiratory": "Respiratory (PaO2/FiO2)",
-        "coagulation": "Coagulation (Platelets)",
-        "liver": "Liver (Bilirubin)",
-        "cardiovascular": "Cardiovascular",
-        "cns": "CNS (GCS)",
-        "renal": "Renal (Creatinine)",
-    }
-
-    def format_sofa_for_prompt(sofa_data):
-        """Format SOFA scores as a markdown table for prompt inclusion."""
-        if not sofa_data or sofa_data["total_score"] < 2:
-            return "SOFA score < 2 or unavailable. Do not include a SOFA table in the letter."
-
-        lines = []
-        lines.append("SOFA SCORES (calculated from raw clinical data):")
-        lines.append("")
-        lines.append("| Organ System | Score | Value | Timestamp |")
-        lines.append("|---|---|---|---|")
-        for organ_key in ["respiratory", "coagulation", "liver", "cardiovascular", "cns", "renal"]:
-            if organ_key in sofa_data["organ_scores"]:
-                data = sofa_data["organ_scores"][organ_key]
-                display = ORGAN_DISPLAY_NAMES.get(organ_key, organ_key)
-                lines.append(f"| {display} | {data['score']} | {data['value']} | {data.get('timestamp', 'N/A')} |")
-        lines.append(f"| **TOTAL** | **{sofa_data['total_score']}** | {sofa_data['organs_scored']} organs scored | |")
-        lines.append("")
-
-        if sofa_data.get("vasopressor_detail"):
-            drugs = set(v["drug"] for v in sofa_data["vasopressor_detail"])
-            lines.append(f"Vasopressors administered: {', '.join(sorted(drugs))}")
-
-        return "\n".join(lines)
 
     WRITER_PROMPT = '''You are a clinical coding expert writing a DRG validation appeal letter for Mercy Hospital.
 
@@ -360,8 +335,8 @@ else:
 # Structured Data Summary (SUPPORTING EVIDENCE - from labs, vitals, meds)
 {structured_data_summary}
 
-# Computed SOFA Scores
-{sofa_scores_section}
+# Computed Clinical Scores
+{clinical_scores_section}
 
 # Official Clinical Definition
 {clinical_definition_section}
@@ -385,11 +360,7 @@ Payor: {payor}
 2. ADDRESS EACH DENIAL ARGUMENT - quote the payer, then refute
 3. CITE CLINICAL EVIDENCE - cite physician notes FIRST as primary evidence, then supporting structured data values
 4. INCLUDE TIMESTAMPS with every clinical value cited
-5. SOFA SCORING:
-   - If SOFA scores are provided above (total >= 2), reference them narratively when arguing organ dysfunction
-   - Cite the individual organ scores and total score as clinical evidence of organ dysfunction severity
-   - Do NOT include a SOFA table in the letter text — the table is rendered separately in the document
-   - If no SOFA scores are provided, do not mention SOFA scoring
+{scoring_instructions}
 6. Follow the Mercy Hospital template structure exactly
 
 # LANGUAGE RULES (MANDATORY)
@@ -424,9 +395,12 @@ Return ONLY the letter text.'''
     # CELL 7: Assessment Functions
     # =============================================================================
 
-    ASSESSMENT_PROMPT = '''You are evaluating the strength of a sepsis DRG appeal letter.
+    ASSESSMENT_PROMPT = '''You are evaluating the strength of a {condition_label}.
 
-═══ PROPEL SEPSIS CRITERIA ═══
+═══ {criteria_label} ═══'''.format(
+        condition_label=profile.ASSESSMENT_CONDITION_LABEL,
+        criteria_label=profile.ASSESSMENT_CRITERIA_LABEL,
+    ) + '''
 {propel_definition}
 
 ═══ DENIAL LETTER ═══
@@ -441,8 +415,8 @@ Return ONLY the letter text.'''
 ═══ STRUCTURED DATA SUMMARY ═══
 {structured_summary}
 
-═══ COMPUTED SOFA SCORES ═══
-{sofa_scores_text}
+═══ COMPUTED CLINICAL SCORES ═══
+{clinical_scores_text}
 
 ═══ GENERATED APPEAL LETTER ═══
 {generated_letter}
@@ -480,7 +454,7 @@ Return ONLY valid JSON in this format:
 
     def assess_appeal_strength(generated_letter, propel_definition, denial_text,
                                extracted_notes, gold_letter_text, structured_summary,
-                               sofa_data=None):
+                               scores_data=None):
         """Assess the strength of a generated appeal letter."""
         print("  Running strength assessment...")
 
@@ -492,8 +466,11 @@ Return ONLY valid JSON in this format:
                 notes_summary.append(f"## {note_type}\n{truncated}")
         extracted_clinical_data = "\n\n".join(notes_summary) if notes_summary else "No clinical notes available"
 
-        # Format SOFA scores for assessment
-        sofa_scores_text = format_sofa_for_prompt(sofa_data) if sofa_data else "SOFA scores not available"
+        # Format clinical scores for assessment
+        if scores_data and hasattr(profile, 'format_scores_for_prompt'):
+            clinical_scores_text = profile.format_scores_for_prompt(scores_data)
+        else:
+            clinical_scores_text = "Clinical scores not available"
 
         try:
             response = openai_client.chat.completions.create(
@@ -506,7 +483,7 @@ Return ONLY valid JSON in this format:
                         gold_letter_text=gold_letter_text[:3000] if gold_letter_text else "No gold letter template used",
                         extracted_clinical_data=extracted_clinical_data,
                         structured_summary=structured_summary[:3000] if structured_summary else "No structured data",
-                        sofa_scores_text=sofa_scores_text,
+                        clinical_scores_text=clinical_scores_text,
                         generated_letter=generated_letter
                     )}
                 ],
@@ -628,9 +605,9 @@ Return ONLY valid JSON in this format:
         gold_letter_section = "No template available."
         gold_letter_instructions = ""
 
-    # Clinical definition
-    if case_data["is_sepsis"] and "sepsis" in propel_definitions:
-        clinical_definition_section = f"## OFFICIAL SEPSIS DEFINITION\n{propel_definitions['sepsis']}"
+    # Clinical definition (from Propel, condition-specific)
+    if case_data["is_condition_match"] and profile.CONDITION_NAME in propel_definitions:
+        clinical_definition_section = f"## OFFICIAL {profile.CONDITION_DISPLAY_NAME.upper()} DEFINITION\n{propel_definitions[profile.CONDITION_NAME]}"
     else:
         clinical_definition_section = "No specific definition loaded."
 
@@ -642,18 +619,22 @@ Return ONLY valid JSON in this format:
             clinical_notes_parts.append(f"## {display_name}\n{note_content}")
     clinical_notes_section = "\n\n".join(clinical_notes_parts) if clinical_notes_parts else "No clinical notes available."
 
-    # Format SOFA scores for prompt
-    sofa_scores_section = format_sofa_for_prompt(case_data.get("sofa_scores"))
+    # Format clinical scores for prompt
+    if case_data.get("clinical_scores") and hasattr(profile, 'format_scores_for_prompt'):
+        clinical_scores_section = profile.format_scores_for_prompt(case_data.get("clinical_scores"))
+    else:
+        clinical_scores_section = "Clinical scores not available."
 
     # Build prompt
     writer_prompt = WRITER_PROMPT.format(
         denial_letter_text=case_data["denial_text"],
         clinical_notes_section=clinical_notes_section,
         structured_data_summary=structured_summary,
-        sofa_scores_section=sofa_scores_section,
+        clinical_scores_section=clinical_scores_section,
         clinical_definition_section=clinical_definition_section,
         gold_letter_section=gold_letter_section,
         gold_letter_instructions=gold_letter_instructions,
+        scoring_instructions=profile.WRITER_SCORING_INSTRUCTIONS,
         patient_name=case_data.get("patient_name", ""),
         patient_dob=case_data.get("patient_dob", ""),
         hsp_account_id=account_id,
@@ -682,13 +663,13 @@ Return ONLY valid JSON in this format:
     # STEP 3: Assess appeal strength
     # -------------------------------------------------------------------------
     print("\nStep 3: Assessing appeal strength...")
-    propel_def = propel_definitions.get("sepsis") if case_data["is_sepsis"] else None
+    propel_def = propel_definitions.get(profile.CONDITION_NAME) if case_data["is_condition_match"] else None
     gold_text = gold_letter.get("appeal_text", "") if gold_letter else ""
 
     assessment = assess_appeal_strength(
         letter_text, propel_def, case_data["denial_text"],
         extracted_notes, gold_text, structured_summary,
-        sofa_data=case_data.get("sofa_scores")
+        scores_data=case_data.get("clinical_scores")
     )
 
     # -------------------------------------------------------------------------
@@ -741,17 +722,10 @@ Return ONLY valid JSON in this format:
             p = doc.add_paragraph(line)
             p.paragraph_format.space_after = Pt(0)
 
-        # SOFA status note in internal review
-        sofa_data = case_data.get("sofa_scores")
-        if not sofa_data:
-            sofa_note = doc.add_paragraph()
-            sofa_note.add_run("SOFA Table: ").bold = True
-            sofa_note.add_run("Not included — insufficient structured data to calculate SOFA scores for this encounter.")
-        elif sofa_data.get("total_score", 0) < 2:
-            sofa_note = doc.add_paragraph()
-            sofa_note.add_run("SOFA Table: ").bold = True
-            sofa_note.add_run(f"Not included — total SOFA score is {sofa_data['total_score']} (below threshold of 2). "
-                              f"{sofa_data.get('organs_scored', 0)} organ system(s) scored.")
+        # Clinical scores status note in internal review (condition-specific)
+        scores_data = case_data.get("clinical_scores")
+        if hasattr(profile, 'render_scores_status_note'):
+            profile.render_scores_status_note(doc, scores_data)
 
         doc.add_paragraph("═" * 55)
 
@@ -779,48 +753,10 @@ Return ONLY valid JSON in this format:
                 p = add_markdown_paragraph(doc, paragraph.strip())
                 p.paragraph_format.space_after = Pt(12)
 
-        # SOFA Score Table (programmatic, deterministic - placed after letter body)
-        sofa_data = case_data.get("sofa_scores")
-        if sofa_data and sofa_data.get("total_score", 0) >= 2:
-            doc.add_paragraph()
-            sofa_header = doc.add_paragraph()
-            sofa_header.add_run("Appendix: SOFA Score Summary").bold = True
-            sofa_header.paragraph_format.space_after = Pt(4)
-
-            organ_order = ["respiratory", "coagulation", "liver", "cardiovascular", "cns", "renal"]
-            organs_with_data = [o for o in organ_order if o in sofa_data["organ_scores"]]
-
-            table = doc.add_table(rows=1 + len(organs_with_data) + 1, cols=4, style='Table Grid')
-            # Header row
-            hdr = table.rows[0]
-            for i, text in enumerate(["Organ System", "Score", "Value", "Timestamp"]):
-                hdr.cells[i].text = text
-                for run in hdr.cells[i].paragraphs[0].runs:
-                    run.bold = True
-
-            # Data rows (only organs with data)
-            row_idx = 1
-            for organ_key in organ_order:
-                if organ_key not in sofa_data["organ_scores"]:
-                    continue
-                data = sofa_data["organ_scores"][organ_key]
-                display = ORGAN_DISPLAY_NAMES.get(organ_key, organ_key)
-                row = table.rows[row_idx]
-                row.cells[0].text = display
-                row.cells[1].text = str(data["score"])
-                row.cells[2].text = str(data.get("value", ""))
-                row.cells[3].text = str(data.get("timestamp", ""))[:19] if data.get("timestamp") else ""
-                row_idx += 1
-
-            # Total row
-            total_row = table.rows[row_idx]
-            total_row.cells[0].text = "TOTAL"
-            total_row.cells[1].text = str(sofa_data["total_score"])
-            total_row.cells[2].text = f"{sofa_data['organs_scored']} organs scored"
-            total_row.cells[3].text = ""
-            for cell in total_row.cells:
-                for run in cell.paragraphs[0].runs:
-                    run.bold = True
+        # Clinical Score Table (condition-specific, placed after letter body)
+        scores_data = case_data.get("clinical_scores")
+        if hasattr(profile, 'render_scores_in_docx'):
+            profile.render_scores_in_docx(doc, scores_data)
 
         # Save
         patient_name = case_data.get('patient_name', 'Unknown')

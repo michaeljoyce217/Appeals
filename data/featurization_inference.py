@@ -1,12 +1,12 @@
 # data/featurization_inference.py
-# Sepsis Appeal Engine - Per-Case Data Preparation
+# DRG Appeal Engine - Per-Case Data Preparation
 #
 # PER-CASE FEATURIZATION: Prepares all data needed for a single appeal:
 # 1. Parse denial PDF → Extract text, account ID, payor, DRGs
 # 2. Query clinical notes → ALL notes from 47 types from Epic Clarity
 # 3. Extract clinical notes → LLM summarization of long notes
 # 4. Query structured data → Labs, vitals, meds, diagnoses
-# 5. Extract structured data → LLM summarization for sepsis evidence
+# 5. Extract structured data → LLM summarization for condition evidence
 # 6. Conflict detection → Flag discrepancies between notes and structured data
 # 7. Write to case tables → Ready for inference.py to read
 #
@@ -24,12 +24,17 @@
 import os
 import re
 import json
+import importlib
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, ArrayType, FloatType, BooleanType, TimestampType
 
 spark = SparkSession.builder.getOrCreate()
+
+# Condition profile — set to the condition being processed
+CONDITION_PROFILE = "sepsis"  # "sepsis", "respiratory_failure", etc.
+profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
 
 # -----------------------------------------------------------------------------
 # INPUT: Set the denial PDF to process
@@ -67,8 +72,25 @@ MEDS_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_meds"
 DIAGNOSIS_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_diagnoses"
 MERGED_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_structured_timeline"
 
+# Clinical scores table (from condition profile, optional)
+CASE_SCORES_TABLE = f"{trgt_cat}.fin_ds.{profile.CLINICAL_SCORES_TABLE_NAME}" if profile.CLINICAL_SCORES_TABLE_NAME else None
+
 print(f"Denial PDF: {DENIAL_PDF_PATH}")
 print(f"Catalog: {trgt_cat}")
+print(f"Condition profile: {profile.CONDITION_DISPLAY_NAME}")
+
+# Load Propel definition for this condition (drives note extraction targets dynamically)
+PROPEL_DATA_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_propel_data"
+PROPEL_DEFINITION_SUMMARY = None
+try:
+    propel_row = spark.sql(f"SELECT definition_summary FROM {PROPEL_DATA_TABLE} WHERE condition_name = '{profile.CONDITION_NAME}'").first()
+    if propel_row:
+        PROPEL_DEFINITION_SUMMARY = propel_row["definition_summary"]
+        print(f"Propel definition loaded: {len(PROPEL_DEFINITION_SUMMARY)} chars")
+    else:
+        print("Propel definition not found — using profile fallback targets")
+except Exception:
+    print("Propel table not available — using profile fallback targets")
 
 # =============================================================================
 # CELL 2: Azure Credentials and Clients
@@ -138,7 +160,7 @@ def generate_embedding(text):
 DENIAL_PARSER_PROMPT = '''Extract key information from this denial letter.
 
 # Denial Letter Text
-{denial_text}
+{{denial_text}}
 
 # Instructions
 Find:
@@ -146,7 +168,7 @@ Find:
 2. INSURANCE PAYOR - the company that sent this denial
 3. ORIGINAL DRG - the DRG code the hospital billed (e.g., 871). ONLY if explicitly stated as a number.
 4. PROPOSED DRG - the DRG the payor wants to change it to (e.g., 872). ONLY if explicitly stated as a number.
-5. IS SEPSIS RELATED - does this denial involve sepsis, severe sepsis, or septic shock?
+{condition_question}
 
 CRITICAL: For DRG codes, return NONE unless you see an actual 3-digit DRG number explicitly written in the letter.
 Do NOT guess or infer DRG codes. If the letter just says "adjusted" or "changed" without specific numbers, return NONE.
@@ -156,7 +178,10 @@ ACCOUNT_ID: [H-prefixed number or NONE]
 PAYOR: [insurance company name]
 ORIGINAL_DRG: [3-digit code ONLY if explicitly stated, otherwise NONE]
 PROPOSED_DRG: [3-digit code ONLY if explicitly stated, otherwise NONE]
-IS_SEPSIS: [YES or NO]'''
+{condition_field}: [YES or NO]'''.format(
+    condition_question=profile.DENIAL_CONDITION_QUESTION,
+    condition_field=profile.DENIAL_CONDITION_FIELD,
+)
 
 
 def transform_hsp_account_id(raw_id):
@@ -185,12 +210,14 @@ def transform_hsp_account_id(raw_id):
 
 def extract_denial_info_llm(text):
     """Use LLM to extract denial info from text."""
+    condition_field = profile.DENIAL_CONDITION_FIELD
+
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": "Extract information accurately. Return only the requested format."},
-                {"role": "user", "content": DENIAL_PARSER_PROMPT.format(denial_text=text[:15000])}
+                {"role": "user", "content": DENIAL_PARSER_PROMPT.replace("{denial_text}", text[:15000])}
             ],
             temperature=0,
             max_tokens=200
@@ -203,7 +230,7 @@ def extract_denial_info_llm(text):
             "payor": "Unknown",
             "original_drg": None,
             "proposed_drg": None,
-            "is_sepsis": False
+            "is_condition_match": False
         }
 
         for line in raw.split("\n"):
@@ -225,8 +252,8 @@ def extract_denial_info_llm(text):
             elif key == "PROPOSED_DRG":
                 if value and value.upper() != "NONE":
                     result["proposed_drg"] = value
-            elif key == "IS_SEPSIS":
-                result["is_sepsis"] = value.upper() == "YES"
+            elif key == condition_field:
+                result["is_condition_match"] = value.upper() == "YES"
 
         return result
 
@@ -237,7 +264,7 @@ def extract_denial_info_llm(text):
             "payor": "Unknown",
             "original_drg": None,
             "proposed_drg": None,
-            "is_sepsis": False
+            "is_condition_match": False
         }
 
 
@@ -412,39 +439,33 @@ print("Clinical notes query functions loaded")
 # CELL 5: Clinical Note Extraction (LLM)
 # =============================================================================
 
-NOTE_EXTRACTION_PROMPT = '''Extract clinically relevant information from this {note_type}.
+def _build_extraction_targets():
+    """Build extraction targets from Propel definition or profile fallback."""
+    if PROPEL_DEFINITION_SUMMARY:
+        return f"""# What to Extract (from clinical criteria)
+Based on the official clinical definition, extract all information relevant to:
+
+{PROPEL_DEFINITION_SUMMARY}
+
+Include ALL associated dates/times."""
+    else:
+        return f"""# What to Extract (with timestamps)
+
+{profile.NOTE_EXTRACTION_TARGETS}"""
+
+
+NOTE_EXTRACTION_PROMPT = '''Extract clinically relevant information from this {{note_type}}.
 
 CRITICAL: For EVERY piece of information you extract, include the associated date/time if available.
 Format timestamps consistently as: MM/DD/YYYY HH:MM or MM/DD/YYYY if time not available.
 
 # Clinical Note
-{note_text}
+{{note_text}}
 
-# What to Extract (with timestamps)
-
-## SOFA Score Components (PRIORITY - extract ALL available)
-- Respiration: PaO2/FiO2 ratio, SpO2/FiO2, oxygen requirements, ventilator settings
-- Coagulation: Platelet count
-- Liver: Bilirubin (total)
-- Cardiovascular: MAP, hypotension, vasopressor use (drug, dose)
-- CNS: GCS (Glasgow Coma Scale), mental status changes
-- Renal: Creatinine, urine output
-
-## Other Sepsis Markers
-- Lactate levels (CRITICAL - include all values with times)
-- WBC count, bands
-- Temperature (fever, hypothermia)
-- Heart rate, respiratory rate
-- Blood culture results, infection source
-- Antibiotic administration times
-
-## Clinical Events
-- Fluid resuscitation (volume, timing)
-- ICU admission/transfer
-- Physician assessments mentioning sepsis, SIRS, infection
+{extraction_targets}
 
 # Output Format
-Return a structured summary with timestamps. Be thorough but concise.'''
+Return a structured summary with timestamps. Be thorough but concise.'''.format(extraction_targets=_build_extraction_targets())
 
 
 def extract_clinical_data(note_text, note_type):
@@ -457,7 +478,7 @@ def extract_clinical_data(note_text, note_type):
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": "You are a clinical data extraction specialist. Extract relevant medical information with precise timestamps."},
-                {"role": "user", "content": NOTE_EXTRACTION_PROMPT.format(note_type=note_type, note_text=note_text)}
+                {"role": "user", "content": NOTE_EXTRACTION_PROMPT.replace("{note_type}", note_type).replace("{note_text}", note_text)}
             ],
             temperature=0,
             max_tokens=3000
@@ -750,436 +771,10 @@ def create_merged_timeline(account_id):
 print("Structured data query functions loaded")
 
 # =============================================================================
-# CELL 6.5: Programmatic SOFA Score Calculator
+# CELL 6.5: Clinical Score Calculator (delegated to condition profile)
 # =============================================================================
 
-# SOFA table output
-CASE_SOFA_TABLE = f"{trgt_cat}.fin_ds.fudgesicle_case_sofa_scores"
-
-# --- 2A: SOFA Threshold Table ---
-# Standard SOFA scoring thresholds (deterministic, zero LLM calls)
-SOFA_THRESHOLDS = {
-    "respiratory": {
-        # PaO2/FiO2 ratio thresholds
-        # Score 3 and 4 require mechanical ventilation (not tracked here, scored as 2 max without vent info)
-        0: lambda ratio: ratio >= 400,
-        1: lambda ratio: 300 <= ratio < 400,
-        2: lambda ratio: 200 <= ratio < 300,
-        3: lambda ratio: 100 <= ratio < 200,  # with vent
-        4: lambda ratio: ratio < 100,          # with vent
-    },
-    "coagulation": {
-        # Platelets x10³/µL
-        0: lambda v: v >= 150,
-        1: lambda v: 100 <= v < 150,
-        2: lambda v: 50 <= v < 100,
-        3: lambda v: 20 <= v < 50,
-        4: lambda v: v < 20,
-    },
-    "liver": {
-        # Bilirubin mg/dL
-        0: lambda v: v < 1.2,
-        1: lambda v: 1.2 <= v < 2.0,
-        2: lambda v: 2.0 <= v < 6.0,
-        3: lambda v: 6.0 <= v < 12.0,
-        4: lambda v: v >= 12.0,
-    },
-    "cardiovascular_map": {
-        # MAP only (vasopressor scoring handled separately)
-        0: lambda v: v >= 70,
-        1: lambda v: v < 70,
-    },
-    "cns": {
-        # GCS
-        0: lambda v: v == 15,
-        1: lambda v: 13 <= v <= 14,
-        2: lambda v: 10 <= v <= 12,
-        3: lambda v: 6 <= v <= 9,
-        4: lambda v: v < 6,
-    },
-    "renal": {
-        # Creatinine mg/dL
-        0: lambda v: v < 1.2,
-        1: lambda v: 1.2 <= v < 2.0,
-        2: lambda v: 2.0 <= v < 3.5,
-        3: lambda v: 3.5 <= v < 5.0,
-        4: lambda v: v >= 5.0,
-    },
-}
-
-# --- 2B: Lab/Vital/Med Name Matching ---
-# Keyword-based matching to handle Epic name variations
-LAB_VITAL_MATCHERS = {
-    "platelets": {
-        "keywords": ["platelet"],
-        "exclude": ["platelet function", "platelet antibod", "platelet aggreg"],
-        "type": "lab",
-    },
-    "bilirubin": {
-        "keywords": ["bilirubin total", "total bilirubin", "bilirubin,total", "bilirubin, total"],
-        "exclude": ["direct", "indirect", "conjugated", "neonatal", "urine"],
-        "type": "lab",
-    },
-    "creatinine": {
-        "keywords": ["creatinine"],
-        "exclude": ["clearance", "urine", "ratio", "kinase", "random"],
-        "type": "lab",
-    },
-    "pao2": {
-        "keywords": ["po2", "pao2", "p02"],
-        "exclude": ["pco2", "spco2", "venous"],
-        "type": "lab",
-    },
-    "fio2": {
-        "keywords": ["fio2", "fi02", "fraction of inspired"],
-        "exclude": [],
-        "type": "lab",
-    },
-    "lactate": {
-        "keywords": ["lactate", "lactic acid"],
-        "exclude": ["dehydrogenase", "ldh"],
-        "type": "lab",
-    },
-    "map": {
-        "keywords": ["map", "mean arterial"],
-        "exclude": [],
-        "type": "vital",
-    },
-    "gcs": {
-        "keywords": ["gcs", "glasgow"],
-        "exclude": ["component", "eye", "motor", "verbal"],
-        "type": "vital",
-    },
-}
-
-VASOPRESSOR_MATCHERS = {
-    "norepinephrine": ["norepinephrine", "levophed"],
-    "epinephrine": ["epinephrine", "adrenaline"],
-    "dopamine": ["dopamine"],
-    "dobutamine": ["dobutamine"],
-    "vasopressin": ["vasopressin"],
-    "phenylephrine": ["phenylephrine", "neosynephrine"],
-}
-
-
-def match_name(name, matcher):
-    """Check if a lab/vital name matches a matcher pattern."""
-    name_lower = name.lower()
-    # Must match at least one keyword
-    if not any(kw in name_lower for kw in matcher["keywords"]):
-        return False
-    # Must not match any exclusion
-    if any(ex in name_lower for ex in matcher["exclude"]):
-        return False
-    return True
-
-
-def match_vasopressor(med_name):
-    """Return vasopressor category if med matches, else None."""
-    med_lower = med_name.lower()
-    for category, keywords in VASOPRESSOR_MATCHERS.items():
-        if any(kw in med_lower for kw in keywords):
-            return category
-    return None
-
-
-def safe_float(value):
-    """Parse a numeric value, returning None if not parseable."""
-    if value is None:
-        return None
-    try:
-        cleaned = str(value).strip().replace(',', '').replace('>', '').replace('<', '')
-        return float(cleaned)
-    except (ValueError, TypeError):
-        return None
-
-
-def score_organ(organ, value):
-    """Score a single organ system. Returns score (0-4) or None if thresholds don't match."""
-    thresholds = SOFA_THRESHOLDS.get(organ, {})
-    # Check from worst (4) to best (0) to find the matching score
-    for score in sorted(thresholds.keys(), reverse=True):
-        if thresholds[score](value):
-            return score
-    return 0
-
-
-def calculate_sofa_scores(account_id):
-    """
-    Calculate SOFA scores from raw structured data tables.
-    Reads directly from fudgesicle_labs, fudgesicle_vitals, fudgesicle_meds.
-    Returns dict with organ_scores, total_score, organs_scored.
-    Zero LLM calls — purely deterministic.
-    """
-    print("  Calculating SOFA scores from raw data...")
-    organ_scores = {}
-    vasopressor_detail = []
-
-    # --- Gather lab values ---
-    try:
-        labs_df = spark.sql(f"""
-            SELECT LAB_NAME, lab_value, EVENT_TIMESTAMP
-            FROM {LABS_TABLE}
-            WHERE lab_value IS NOT NULL
-            ORDER BY EVENT_TIMESTAMP ASC
-        """)
-        labs_rows = labs_df.collect()
-    except Exception as e:
-        print(f"    Warning: Could not read labs: {e}")
-        labs_rows = []
-
-    # --- Gather vital values ---
-    try:
-        vitals_df = spark.sql(f"""
-            SELECT VITAL_NAME, vital_value, EVENT_TIMESTAMP
-            FROM {VITALS_TABLE}
-            WHERE vital_value IS NOT NULL
-            ORDER BY EVENT_TIMESTAMP ASC
-        """)
-        vitals_rows = vitals_df.collect()
-    except Exception as e:
-        print(f"    Warning: Could not read vitals: {e}")
-        vitals_rows = []
-
-    # --- Gather med values ---
-    try:
-        meds_df = spark.sql(f"""
-            SELECT MED_NAME, MED_DOSE, EVENT_TIMESTAMP
-            FROM {MEDS_TABLE}
-            WHERE MED_NAME IS NOT NULL
-            ORDER BY EVENT_TIMESTAMP ASC
-        """)
-        meds_rows = meds_df.collect()
-    except Exception as e:
-        print(f"    Warning: Could not read meds: {e}")
-        meds_rows = []
-
-    # --- Process labs for worst values ---
-    lab_worsts = {}  # category -> (worst_value, timestamp, score)
-    pao2_values = []  # collect for ratio calculation
-    fio2_values = []
-
-    for row in labs_rows:
-        name = row["LAB_NAME"]
-        val = safe_float(row["lab_value"])
-        ts = row["EVENT_TIMESTAMP"]
-        if val is None:
-            continue
-
-        for category, matcher in LAB_VITAL_MATCHERS.items():
-            if matcher["type"] != "lab":
-                continue
-            if not match_name(name, matcher):
-                continue
-
-            if category == "pao2":
-                pao2_values.append((val, ts))
-            elif category == "fio2":
-                fio2_values.append((val, ts))
-            elif category == "platelets":
-                score = score_organ("coagulation", val)
-                if "coagulation" not in lab_worsts or score > lab_worsts["coagulation"][2]:
-                    lab_worsts["coagulation"] = (val, ts, score)
-            elif category == "bilirubin":
-                score = score_organ("liver", val)
-                if "liver" not in lab_worsts or score > lab_worsts["liver"][2]:
-                    lab_worsts["liver"] = (val, ts, score)
-            elif category == "creatinine":
-                score = score_organ("renal", val)
-                if "renal" not in lab_worsts or score > lab_worsts["renal"][2]:
-                    lab_worsts["renal"] = (val, ts, score)
-
-    # --- Respiratory: PaO2/FiO2 ratio ---
-    if pao2_values and fio2_values:
-        # Find worst ratio using closest-in-time pairs
-        best_resp_score = 0
-        best_resp_val = None
-        best_resp_ts = None
-        for pao2_val, pao2_ts in pao2_values:
-            # Find closest FiO2 in time
-            closest_fio2 = None
-            closest_diff = None
-            for fio2_val, fio2_ts in fio2_values:
-                if fio2_val <= 0:
-                    continue
-                # FiO2 can be expressed as fraction (0.21-1.0) or percent (21-100)
-                actual_fio2 = fio2_val if fio2_val <= 1.0 else fio2_val / 100.0
-                if actual_fio2 <= 0:
-                    continue
-                diff = abs((pao2_ts - fio2_ts).total_seconds()) if pao2_ts and fio2_ts else float('inf')
-                if closest_diff is None or diff < closest_diff:
-                    closest_diff = diff
-                    closest_fio2 = actual_fio2
-            if closest_fio2 and closest_fio2 > 0:
-                ratio = pao2_val / closest_fio2
-                score = score_organ("respiratory", ratio)
-                if score > best_resp_score:
-                    best_resp_score = score
-                    best_resp_val = round(ratio, 1)
-                    best_resp_ts = pao2_ts
-        if best_resp_val is not None:
-            organ_scores["respiratory"] = {
-                "score": best_resp_score,
-                "value": f"PaO2/FiO2 = {best_resp_val}",
-                "timestamp": str(best_resp_ts) if best_resp_ts else None,
-            }
-
-    # --- Process vitals for worst values ---
-    for row in vitals_rows:
-        name = row["VITAL_NAME"]
-        val = safe_float(row["vital_value"])
-        ts = row["EVENT_TIMESTAMP"]
-        if val is None:
-            continue
-
-        # MAP
-        if match_name(name, LAB_VITAL_MATCHERS["map"]):
-            score = score_organ("cardiovascular_map", val)
-            if "cardiovascular" not in organ_scores or score > organ_scores.get("cardiovascular", {}).get("score", 0):
-                organ_scores["cardiovascular"] = {
-                    "score": score,
-                    "value": f"MAP = {val}",
-                    "timestamp": str(ts) if ts else None,
-                }
-
-        # GCS
-        if match_name(name, LAB_VITAL_MATCHERS["gcs"]):
-            if val != val:  # NaN check
-                continue
-            int_val = int(round(val))
-            score = score_organ("cns", int_val)
-            if "cns" not in organ_scores or score > organ_scores.get("cns", {}).get("score", 0):
-                organ_scores["cns"] = {
-                    "score": score,
-                    "value": f"GCS = {int_val}",
-                    "timestamp": str(ts) if ts else None,
-                }
-
-    # --- Process meds for vasopressor scoring ---
-    vasopressor_found = {}  # category -> (max_dose, timestamp)
-    for row in meds_rows:
-        med_name = row["MED_NAME"]
-        if not med_name:
-            continue
-        category = match_vasopressor(med_name)
-        if category:
-            dose = safe_float(row["MED_DOSE"])
-            ts = row["EVENT_TIMESTAMP"]
-            vasopressor_detail.append({
-                "drug": category,
-                "dose": dose,
-                "timestamp": str(ts) if ts else None,
-            })
-            if category not in vasopressor_found:
-                vasopressor_found[category] = (dose, ts)
-            elif dose is not None:
-                existing_dose = vasopressor_found[category][0]
-                if existing_dose is None or dose > existing_dose:
-                    vasopressor_found[category] = (dose, ts)
-
-    # Override cardiovascular score if vasopressors found
-    if vasopressor_found:
-        max_cv_score = organ_scores.get("cardiovascular", {}).get("score", 0)
-        cv_detail = organ_scores.get("cardiovascular", {}).get("value", "")
-        cv_ts = organ_scores.get("cardiovascular", {}).get("timestamp")
-
-        for drug, (dose, ts) in vasopressor_found.items():
-            cv_score = 2  # default: any vasopressor = at least 2
-            if drug == "dopamine" and dose is not None:
-                if dose > 15:
-                    cv_score = 4
-                elif dose > 5:
-                    cv_score = 3
-                else:
-                    cv_score = 2
-            elif drug == "dobutamine":
-                cv_score = 2
-            elif drug in ("epinephrine", "norepinephrine") and dose is not None:
-                if dose > 0.1:
-                    cv_score = 4
-                else:
-                    cv_score = 3
-            elif drug in ("epinephrine", "norepinephrine"):
-                # Presence of epi/norepi without dose data → score 3 (conservative:
-                # clinical use of these agents implies hemodynamic instability requiring
-                # at minimum low-dose vasopressor support, which is SOFA 3)
-                cv_score = 3
-
-            if cv_score > max_cv_score:
-                max_cv_score = cv_score
-                dose_str = f" {dose}" if dose is not None else ""
-                cv_detail = f"{drug}{dose_str}"
-                cv_ts = str(ts) if ts else None
-
-        organ_scores["cardiovascular"] = {
-            "score": max_cv_score,
-            "value": cv_detail,
-            "timestamp": cv_ts,
-        }
-
-    # --- Add lab-derived organ scores ---
-    for organ_key, (val, ts, score) in lab_worsts.items():
-        organ_scores[organ_key] = {
-            "score": score,
-            "value": str(val),
-            "timestamp": str(ts) if ts else None,
-        }
-
-    # --- Compute totals ---
-    total_score = sum(o["score"] for o in organ_scores.values())
-    organs_scored = len(organ_scores)
-
-    print(f"    SOFA Total: {total_score} ({organs_scored} organs scored)")
-    for organ, data in organ_scores.items():
-        print(f"      {organ}: {data['score']} ({data['value']} at {data['timestamp']})")
-
-    return {
-        "organ_scores": organ_scores,
-        "total_score": total_score,
-        "organs_scored": organs_scored,
-        "vasopressor_detail": vasopressor_detail,
-    }
-
-
-def write_case_sofa_table(account_id, sofa_result):
-    """Write SOFA scores to case table."""
-    spark.sql(f"""
-    CREATE TABLE IF NOT EXISTS {CASE_SOFA_TABLE} (
-        account_id STRING,
-        total_score INT,
-        organs_scored INT,
-        organ_scores STRING,
-        vasopressor_detail STRING,
-        created_at TIMESTAMP
-    ) USING DELTA
-    """)
-
-    from pyspark.sql.types import IntegerType
-
-    record = [{
-        "account_id": account_id,
-        "total_score": sofa_result["total_score"],
-        "organs_scored": sofa_result["organs_scored"],
-        "organ_scores": json.dumps(sofa_result["organ_scores"]),
-        "vasopressor_detail": json.dumps(sofa_result.get("vasopressor_detail", [])),
-        "created_at": datetime.now()
-    }]
-
-    schema = StructType([
-        StructField("account_id", StringType(), False),
-        StructField("total_score", IntegerType(), True),
-        StructField("organs_scored", IntegerType(), True),
-        StructField("organ_scores", StringType(), True),
-        StructField("vasopressor_detail", StringType(), True),
-        StructField("created_at", TimestampType(), True)
-    ])
-
-    df = spark.createDataFrame(record, schema)
-    df.write.format("delta").mode("overwrite").saveAsTable(CASE_SOFA_TABLE)
-    print(f"  Written to {CASE_SOFA_TABLE}")
-
-
-print("SOFA calculator functions loaded")
+print(f"Clinical scorer: {'available' if hasattr(profile, 'calculate_clinical_scores') else 'none'} ({profile.CONDITION_DISPLAY_NAME})")
 
 # =============================================================================
 # CELL 6.7: Numeric Cross-Check (Notes vs Raw Data)
@@ -1250,6 +845,10 @@ def numeric_cross_check(notes_summary, account_id):
     """
     print("  Running numeric cross-check...")
 
+    if not hasattr(profile, 'LAB_VITAL_MATCHERS') or not hasattr(profile, 'PARAM_TO_CATEGORY'):
+        print("    No LAB_VITAL_MATCHERS/PARAM_TO_CATEGORY defined — skipping cross-check")
+        return []
+
     claims = extract_numeric_claims(notes_summary)
     if not claims:
         print("    No numeric claims to cross-check")
@@ -1273,47 +872,36 @@ def numeric_cross_check(notes_summary, account_id):
         vitals_rows = []
 
     # Build lookup: parameter_category -> [(value, timestamp)]
+    # Uses LAB_VITAL_MATCHERS from profile (condition-specific name matching)
     raw_values = {}
     for row in labs_rows:
-        for category, matcher in LAB_VITAL_MATCHERS.items():
+        for category, matcher in profile.LAB_VITAL_MATCHERS.items():
             if matcher["type"] != "lab":
                 continue
-            if match_name(row["LAB_NAME"], matcher):
-                val = safe_float(row["lab_value"])
+            if profile.match_name(row["LAB_NAME"], matcher):
+                val = profile.safe_float(row["lab_value"])
                 if val is not None:
                     raw_values.setdefault(category, []).append((val, row["EVENT_TIMESTAMP"]))
 
     for row in vitals_rows:
-        for category, matcher in LAB_VITAL_MATCHERS.items():
+        for category, matcher in profile.LAB_VITAL_MATCHERS.items():
             if matcher["type"] != "vital":
                 continue
-            if match_name(row["VITAL_NAME"], matcher):
-                val = safe_float(row["vital_value"])
+            if profile.match_name(row["VITAL_NAME"], matcher):
+                val = profile.safe_float(row["vital_value"])
                 if val is not None:
                     raw_values.setdefault(category, []).append((val, row["EVENT_TIMESTAMP"]))
-
-    # Map claim parameter names to our categories
-    PARAM_TO_CATEGORY = {
-        "lactate": "lactate", "lactic acid": "lactate",
-        "creatinine": "creatinine", "cr": "creatinine",
-        "bilirubin": "bilirubin", "total bilirubin": "bilirubin",
-        "platelets": "platelets", "platelet count": "platelets", "plt": "platelets",
-        "map": "map", "mean arterial pressure": "map",
-        "gcs": "gcs", "glasgow coma scale": "gcs", "glasgow": "gcs",
-        "pao2": "pao2", "po2": "pao2",
-        "fio2": "fio2",
-    }
 
     mismatches = []
     for claim in claims:
         param = claim.get("parameter", "").lower().strip()
-        claim_val = safe_float(claim.get("value"))
+        claim_val = profile.safe_float(claim.get("value"))
         claim_ts = claim.get("timestamp", "unknown")
 
         if claim_val is None:
             continue
 
-        category = PARAM_TO_CATEGORY.get(param)
+        category = profile.PARAM_TO_CATEGORY.get(param)
         if not category or category not in raw_values:
             continue
 
@@ -1376,51 +964,27 @@ print("Numeric cross-check functions loaded")
 # CELL 7: Structured Data Extraction (LLM)
 # =============================================================================
 
-STRUCTURED_DATA_EXTRACTION_PROMPT = '''You are a clinical data analyst extracting sepsis-relevant information from structured EHR data.
+STRUCTURED_DATA_EXTRACTION_PROMPT = '''You are a clinical data analyst extracting condition-relevant information from structured EHR data.
 
 **Context on Diagnosis Records:**
-The diagnosis names are the granular clinical descriptions from Epic's diagnosis dictionary. Quote these directly in appeals - they are the specific documented diagnoses. For example:
-- "Severe sepsis with septic shock due to Methicillin-susceptible Staphylococcus aureus"
-- "Sepsis due to Escherichia coli"
+The diagnosis names are the granular clinical descriptions from Epic's diagnosis dictionary. Quote these directly in appeals - they are the specific documented diagnoses.
 
 Multiple diagnosis records may describe the same condition at different levels of specificity. Use the most specific documented diagnosis that is supported by clinical evidence.
 
 Diagnoses include timestamps - use these to understand if a condition is pre-existing (before admission) or documented during the encounter.
 
 **Your Task:**
-Extract a focused summary of sepsis-relevant clinical data from this timeline. Prioritize:
-
-1. **SOFA Score Components** (with timestamps and trends):
-   - Respiratory: PaO2/FiO2, SpO2, oxygen requirements
-   - Coagulation: Platelet count
-   - Liver: Bilirubin
-   - Cardiovascular: MAP, vasopressor use with doses
-   - CNS: GCS
-   - Renal: Creatinine, urine output
-
-2. **Sepsis Bundle Compliance**:
-   - Time of suspected infection
-   - Antibiotic administration (within 3 hours?)
-   - Lactate measurement and remeasurement (within 6 hours if elevated?)
-   - Fluid resuscitation (30 mL/kg within 3 hours if hypotensive/lactate ≥4?)
-   - Vasopressor initiation (if MAP <65 after fluids?)
-
-3. **Clinical Trajectory**:
-   - When did patient meet sepsis criteria?
-   - Worst values and when they occurred
-   - Evidence of organ dysfunction
-
-4. **Relevant Diagnoses** (with dates - note which are pre-existing vs new)
+{condition_context}
 
 **Structured Timeline:**
-{structured_timeline}
+{{structured_timeline}}
 
 **Output Format:**
-Provide a concise clinical summary (500-800 words) organized by the categories above, with specific timestamps and values. Flag any data gaps.'''
+Provide a concise clinical summary (500-800 words) organized by the categories above, with specific timestamps and values. Flag any data gaps.'''.format(condition_context=profile.STRUCTURED_DATA_CONTEXT)
 
 
 def extract_structured_data_summary(account_id):
-    """Extract sepsis-relevant summary from structured data timeline."""
+    """Extract condition-relevant summary from structured data timeline."""
     print("  Extracting structured data summary...")
 
     # Get timeline data
@@ -1442,12 +1006,13 @@ def extract_structured_data_summary(account_id):
         for row in timeline_rows
     ])
 
+    system_msg = getattr(profile, 'STRUCTURED_DATA_SYSTEM_MESSAGE', None) or "You are a clinical data analyst."
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4.1",
             messages=[
-                {"role": "system", "content": "You are a clinical data analyst specializing in sepsis cases."},
-                {"role": "user", "content": STRUCTURED_DATA_EXTRACTION_PROMPT.format(structured_timeline=timeline_text)}
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": STRUCTURED_DATA_EXTRACTION_PROMPT.replace("{structured_timeline}", timeline_text)}
             ],
             temperature=0,
             max_tokens=2000
@@ -1470,20 +1035,16 @@ print("Structured data extraction functions loaded")
 CONFLICT_DETECTION_PROMPT = '''You are comparing clinical documentation from two sources for the same patient encounter:
 
 1. **PHYSICIAN NOTES** (primary source - clinical interpretation):
-{notes_summary}
+{{notes_summary}}
 
 2. **STRUCTURED DATA** (objective measurements):
-{structured_summary}
+{{structured_summary}}
 
 **Your Task:**
 Identify any CONFLICTS where the physician notes say one thing but the structured data shows something different.
 
 Examples of conflicts:
-- Note says "MAP maintained >65" but vitals show MAP values below 65
-- Note says "lactate normalized" but labs show lactate still elevated (>2.0)
-- Note says "no vasopressors needed" but meds show vasopressor administration
-- Note says "patient alert and oriented" but GCS recorded as <15
-- Note says "afebrile" but temps >38°C documented
+{conflict_examples}
 
 **Important:**
 - Only flag CLEAR contradictions, not missing information
@@ -1498,7 +1059,7 @@ CONFLICT 2: [Notes say X, but structured data shows Y]
 If no conflicts: "NO CONFLICTS DETECTED"
 
 Then provide:
-RECOMMENDATION: [Brief guidance for CDI reviewer]'''
+RECOMMENDATION: [Brief guidance for CDI reviewer]'''.format(conflict_examples=profile.CONFLICT_EXAMPLES)
 
 
 def detect_conflicts(notes_summary, structured_summary):
@@ -1513,9 +1074,10 @@ def detect_conflicts(notes_summary, structured_summary):
             model="gpt-4.1",
             messages=[
                 {"role": "system", "content": "You are a clinical documentation integrity specialist."},
-                {"role": "user", "content": CONFLICT_DETECTION_PROMPT.format(
-                    notes_summary=notes_summary[:8000],
-                    structured_summary=structured_summary[:8000]
+                {"role": "user", "content": CONFLICT_DETECTION_PROMPT.replace(
+                    "{notes_summary}", notes_summary[:8000]
+                ).replace(
+                    "{structured_summary}", structured_summary[:8000]
                 )}
             ],
             temperature=0,
@@ -1572,7 +1134,8 @@ def write_case_denial_table(account_id, denial_text, denial_embedding, denial_in
         payor STRING,
         original_drg STRING,
         proposed_drg STRING,
-        is_sepsis BOOLEAN,
+        is_condition_match BOOLEAN,
+        condition_name STRING,
         created_at TIMESTAMP
     ) USING DELTA
     """)
@@ -1584,7 +1147,8 @@ def write_case_denial_table(account_id, denial_text, denial_embedding, denial_in
         "payor": denial_info.get("payor", "Unknown"),
         "original_drg": denial_info.get("original_drg"),
         "proposed_drg": denial_info.get("proposed_drg"),
-        "is_sepsis": denial_info.get("is_sepsis", False),
+        "is_condition_match": denial_info.get("is_condition_match", False),
+        "condition_name": profile.CONDITION_NAME,
         "created_at": datetime.now()
     }]
 
@@ -1595,7 +1159,8 @@ def write_case_denial_table(account_id, denial_text, denial_embedding, denial_in
         StructField("payor", StringType(), True),
         StructField("original_drg", StringType(), True),
         StructField("proposed_drg", StringType(), True),
-        StructField("is_sepsis", BooleanType(), True),
+        StructField("is_condition_match", BooleanType(), True),
+        StructField("condition_name", StringType(), True),
         StructField("created_at", TimestampType(), True)
     ])
 
@@ -1711,7 +1276,7 @@ else:
     print(f"  Account ID: {denial_info['hsp_account_id'] or 'NOT FOUND'}")
     print(f"  Payor: {denial_info['payor']}")
     print(f"  DRG: {denial_info['original_drg']} → {denial_info['proposed_drg']}")
-    print(f"  Sepsis: {denial_info['is_sepsis']}")
+    print(f"  Condition match ({profile.CONDITION_DISPLAY_NAME}): {denial_info['is_condition_match']}")
 
     # Use known account ID if provided
     account_id = KNOWN_ACCOUNT_ID or denial_info['hsp_account_id']
@@ -1751,10 +1316,15 @@ else:
             create_merged_timeline(account_id)
 
             # -------------------------------------------------------------------------
-            # STEP 5.5: Calculate SOFA scores (deterministic, no LLM)
+            # STEP 5.5: Calculate clinical scores (condition-specific, no LLM)
             # -------------------------------------------------------------------------
-            print("\nStep 5.5: Calculating SOFA scores...")
-            sofa_result = calculate_sofa_scores(account_id)
+            print(f"\nStep 5.5: Calculating clinical scores ({profile.CONDITION_DISPLAY_NAME})...")
+            if hasattr(profile, 'calculate_clinical_scores'):
+                scores_result = profile.calculate_clinical_scores(account_id, spark, {
+                    "labs": LABS_TABLE, "vitals": VITALS_TABLE, "meds": MEDS_TABLE
+                })
+            else:
+                scores_result = {"total_score": 0, "organs_scored": 0, "organ_scores": {}}
 
             # -------------------------------------------------------------------------
             # STEP 5.7: Numeric cross-check (notes vs raw data)
@@ -1786,7 +1356,8 @@ else:
             write_case_denial_table(account_id, denial_text, denial_embedding, denial_info)
             write_case_clinical_table(account_id, clinical_data, extracted_notes)
             write_case_structured_summary_table(account_id, structured_summary)
-            write_case_sofa_table(account_id, sofa_result)
+            if hasattr(profile, 'write_clinical_scores_table') and CASE_SCORES_TABLE:
+                profile.write_clinical_scores_table(account_id, scores_result, spark, CASE_SCORES_TABLE)
             write_case_conflicts_table(account_id, conflicts_result)
 
             # -------------------------------------------------------------------------
@@ -1799,7 +1370,7 @@ else:
             print(f"Patient: {clinical_data.get('formatted_name', 'Unknown')}")
             print(f"Clinical notes extracted: {len([v for v in extracted_notes.values() if v != 'Not available'])}")
             print(f"Structured summary: {len(structured_summary)} chars")
-            print(f"SOFA total: {sofa_result['total_score']} ({sofa_result['organs_scored']} organs scored)")
+            print(f"Clinical scores total: {scores_result['total_score']} ({scores_result['organs_scored']} organs scored)")
             print(f"Conflicts: {len(conflicts_result.get('conflicts', []))}")
             if conflicts_result.get('conflicts'):
                 print("\nConflicts found:")

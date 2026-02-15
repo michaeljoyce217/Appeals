@@ -1,15 +1,15 @@
-# Sepsis Appeal Engine - Master Prompt
+# DRG Appeal Engine - Master Prompt
 
-**Last Updated:** 2026-02-10
+**Last Updated:** 2026-02-14
 **Repo:** https://github.com/michaeljoyce217/SEPSIS
 
 ---
 
 ## Project Overview
 
-**Goal:** Automated generation of DRG appeal letters for sepsis-related insurance denials (DRG 870/871/872).
+**Goal:** Automated generation of DRG appeal letters for condition-specific insurance denials. Currently supports sepsis (DRG 870/871/872), extensible to other conditions via condition profiles.
 
-**Architecture:** Three-file pipeline using Azure OpenAI GPT-4.1
+**Architecture:** Three-file pipeline using Azure OpenAI GPT-4.1, with pluggable condition profiles
 
 **Platform:** Databricks on Azure with Unity Catalog
 
@@ -21,6 +21,10 @@
 
 ```
 SEPSIS/
+├── condition_profiles/
+│   ├── __init__.py                   # Package init
+│   ├── sepsis.py                     # Sepsis condition profile (config + SOFA scorer + DOCX rendering)
+│   └── TEMPLATE.py                   # Template for creating new condition profiles
 ├── data/
 │   ├── featurization_train.py        # ONE-TIME: Knowledge base ingestion (gold letters + propel)
 │   ├── featurization_inference.py    # PER-CASE: Data prep (denial + notes + structured data)
@@ -90,6 +94,51 @@ Reads prepared data from case tables (run featurization_inference.py first):
 
 ---
 
+## Condition Profile Architecture
+
+The base engine is condition-agnostic. All condition-specific logic lives in `condition_profiles/<condition>.py`. Each notebook has a `CONDITION_PROFILE` setting at the top:
+
+```python
+CONDITION_PROFILE = "sepsis"  # "sepsis", "respiratory_failure", etc.
+profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
+```
+
+### What a Condition Profile Provides
+
+| Category | Examples (sepsis) |
+|----------|-------------------|
+| **Identity** | `CONDITION_NAME`, `DRG_CODES`, paths to gold letters/Propel/templates |
+| **Denial Parser** | `DENIAL_CONDITION_QUESTION`, `DENIAL_CONDITION_FIELD` |
+| **Note Extraction** | `NOTE_EXTRACTION_TARGETS` (fallback when Propel unavailable) |
+| **Structured Data** | `STRUCTURED_DATA_CONTEXT`, `STRUCTURED_DATA_SYSTEM_MESSAGE` |
+| **Conflict Detection** | `CONFLICT_EXAMPLES` |
+| **Numeric Cross-Check** | `PARAM_TO_CATEGORY`, `LAB_VITAL_MATCHERS` |
+| **Writer Prompt** | `WRITER_SCORING_INSTRUCTIONS` |
+| **Assessment** | `ASSESSMENT_CONDITION_LABEL`, `ASSESSMENT_CRITERIA_LABEL` |
+| **Clinical Scorer** (optional) | `calculate_clinical_scores()`, `write_clinical_scores_table()` |
+| **DOCX Rendering** (optional) | `format_scores_for_prompt()`, `render_scores_in_docx()`, `render_scores_status_note()` |
+
+### Dynamic Note Extraction
+
+The base engine loads the Propel `definition_summary` for the current condition and uses it to drive note extraction targets dynamically. The profile's `NOTE_EXTRACTION_TARGETS` is only used as a fallback when Propel data is unavailable. This means adding a new condition mostly requires data files + config, not code.
+
+### Adding a New Condition
+
+1. Copy `condition_profiles/TEMPLATE.py` to `condition_profiles/<your_condition>.py`
+2. Fill in all required constants (see TEMPLATE.py docstrings)
+3. Add gold standard letters to a `utils/` subdirectory
+4. Add Propel definition PDF to `utils/propel_data/`
+5. Optionally implement a clinical scorer (like SOFA for sepsis)
+6. Set `CONDITION_PROFILE = "<your_condition>"` in each notebook
+7. Run `featurization_train.py` to ingest gold letters and Propel data
+8. Process cases normally with `featurization_inference.py` → `inference.py`
+
+### Schema Changes
+
+The denial table now uses `is_condition_match` (boolean) and `condition_name` (string) instead of the previous `is_sepsis` column.
+
+---
+
 ## Unity Catalog Tables
 
 ### Knowledge Base (populated by featurization_train.py)
@@ -103,7 +152,7 @@ Reads prepared data from case tables (run featurization_inference.py first):
 
 | Table | Purpose |
 |-------|---------|
-| `fudgesicle_case_denial` | Denial text, embedding, payor, DRGs, is_sepsis flag |
+| `fudgesicle_case_denial` | Denial text, embedding, payor, DRGs, is_condition_match flag, condition_name |
 | `fudgesicle_case_clinical` | Patient info + extracted clinical notes (JSON) |
 | `fudgesicle_case_structured_summary` | LLM summary of structured data |
 | `fudgesicle_case_sofa_scores` | Programmatic SOFA scores per organ system (JSON), total score, vasopressor detail |
@@ -144,7 +193,7 @@ SOFA scores are calculated deterministically from raw structured data (zero LLM 
 - **CNS:** GCS (Glasgow Coma Scale) — uses FLO_MEAS_ID '1525'
 - **Renal:** Worst creatinine
 
-When SOFA total >= 2, a formatted table is included in the appeal letter (rendered programmatically in DOCX, not by the LLM). The LLM references the pre-computed scores narratively but does not recalculate.
+When SOFA total >= 2, a formatted table is appended after the letter body (rendered programmatically in DOCX, not by the LLM). The LLM references the scores narratively but does not include a table in the letter text. When the SOFA table is omitted (score < 2 or insufficient data), the internal review section explains why.
 
 ### SOFA Score Extraction (Notes)
 Note extraction still prioritizes organ dysfunction data for qualitative clinical context:
@@ -193,7 +242,7 @@ After letter generation, an LLM evaluates the appeal and produces:
 
 Each finding is marked ✓ present, △ could strengthen, or ✗ missing. The "missing" items in Evidence Quality flag specific data points that weren't cited in the letter.
 
-Assessment appears in DOCX before the letter body for CDI reviewer reference.
+Assessment appears in DOCX before the letter body for CDI reviewer reference. Includes SOFA status note when the SOFA table is omitted.
 
 ### Conservative DRG Extraction
 Parser only extracts DRG codes if explicitly stated as numbers in the denial letter. Returns "Unknown" rather than hallucinating plausible codes.
@@ -254,8 +303,8 @@ Based on Azure OpenAI GPT-4.1 standard pricing ($2.20/1M input, $8.80/1M output)
 | Structured data extraction | ~8,000 | ~1,500 | $0.03 |
 | Conflict detection | ~6,000 | ~500 | $0.02 |
 | Appeal letter generation | ~60,000 | ~3,000 | $0.16 |
-| Strength assessment | ~15,000 | ~800 | $0.04 |
-| **Total** | ~148,000 | ~19,400 | **~$0.50** |
+| Strength assessment | ~15,000 | ~1,500 | $0.05 |
+| **Total** | ~148,000 | ~20,100 | **~$0.50** |
 
 Note: 47 note types are queried but ~20 typically have content for a given sepsis case. All extractions run in parallel so wall-clock time is similar to a single call.
 
@@ -303,7 +352,10 @@ Note: 47 note types are queried but ~20 typically have content for a given sepsi
    - Generates appeal letter
    - Outputs DOCX to `utils/outputs/`
 
-5. **Review output** - includes assessment section and conflicts appendix (if any)
+5. **Review output** - DOCX structure:
+   - Internal review: assessment + SOFA status note + conflicts (if any)
+   - Letter body (LLM-generated)
+   - Appendix: SOFA Score Table (if total >= 2)
 
 ---
 
