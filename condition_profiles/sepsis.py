@@ -6,7 +6,6 @@
 #   profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
 
 import json
-import re
 from datetime import datetime
 
 # =============================================================================

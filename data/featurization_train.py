@@ -40,6 +40,8 @@ spark = SparkSession.builder.getOrCreate()
 # Condition profile — set to the condition being processed
 CONDITION_PROFILE = "sepsis"  # "sepsis", "respiratory_failure", etc.
 profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
+from condition_profiles import validate_profile
+validate_profile(profile)
 
 # Configuration
 EMBEDDING_MODEL = "text-embedding-ada-002"  # 1536 dimensions

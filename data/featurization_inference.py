@@ -35,6 +35,8 @@ spark = SparkSession.builder.getOrCreate()
 # Condition profile — set to the condition being processed
 CONDITION_PROFILE = "sepsis"  # "sepsis", "respiratory_failure", etc.
 profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
+from condition_profiles import validate_profile
+validate_profile(profile)
 
 # -----------------------------------------------------------------------------
 # INPUT: Set the denial PDF to process
@@ -633,7 +635,7 @@ def query_vitals(account_id):
     FROM target_encounter t
     INNER JOIN prod.clarity_cur.ip_flwsht_rec_enh v ON t.PAT_ENC_CSN_ID = v.IP_DATA_STORE_EPT_CSN
     WHERE v.FLO_MEAS_ID IN ('5', '6', '8', '9', '10', '11', '14', '1525')
-      -- '1525' = GCS (Glasgow Coma Scale) for SOFA CNS component
+      -- '1525' = GCS (Glasgow Coma Scale)
       -- Validate with: SELECT DISTINCT FLO_MEAS_ID, FLO_MEAS_NAME FROM prod.clarity_cur.ip_flwsht_rec_enh WHERE FLO_MEAS_NAME LIKE '%GCS%' OR FLO_MEAS_NAME LIKE '%Glasgow%' LIMIT 20
       AND v.MEAS_VALUE IS NOT NULL
     ORDER BY EVENT_TIMESTAMP ASC
