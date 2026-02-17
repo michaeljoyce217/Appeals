@@ -359,11 +359,12 @@ Payor: {payor}
 # Instructions
 {gold_letter_instructions}
 1. READ THE DENIAL LETTER - extract the payor address, reviewer name, claim numbers
-2. ADDRESS EACH DENIAL ARGUMENT - quote the payer, then refute
+2. ADDRESS EACH DENIAL ARGUMENT - quote the payer's argument, then refute using ONLY the Propel criteria. Do not list or critique the payor's references unless necessary to refute a specific clinical claim.
 3. CITE CLINICAL EVIDENCE - cite physician notes FIRST as primary evidence, then supporting structured data values
 4. INCLUDE TIMESTAMPS with every clinical value cited
 {scoring_instructions}
 6. Follow the Mercy Hospital template structure exactly
+{conditional_rebuttals_section}
 
 # LANGUAGE RULES (MANDATORY)
 These rules are non-negotiable. Every sentence in the letter must comply.
@@ -390,6 +391,12 @@ RULES:
 4. Do not qualify severity — let the clinical values speak for themselves.
 
 EVIDENCE DENSITY: Every paragraph in the clinical argument must contain at least one specific clinical value with its timestamp.
+
+# SOURCE FIDELITY
+The ONLY authoritative source for clinical definitions, diagnostic criteria, and approved references is the PROPEL CRITERIA section above. You may cite references from the Propel document's reference list. DO NOT list or comment on the payor's cited references unless directly refuting a specific clinical claim.
+
+# FORMATTING REQUIREMENTS
+- DO NOT include a "Summary Table of Key Clinical Data" or any similar summary table at the end of the letter. All clinical data should be presented within the body of the letter where it is relevant to the argument. Do not repeat it in a table format at the end.
 
 Return ONLY the letter text.'''
 
@@ -423,23 +430,39 @@ Return ONLY the letter text.'''
 ═══ GENERATED APPEAL LETTER ═══
 {generated_letter}
 
+{conditional_rebuttals_section}
+
 ═══ EVALUATION INSTRUCTIONS ═══
+IMPORTANT: The Propel criteria above is the ONLY authoritative source for clinical definitions and approved references.
+
+- References cited in the appeal letter are acceptable ONLY if they appear in the Propel document's reference list.
+- If the appeal letter cites a reference from the payor's denial letter that is NOT in the Propel document, flag this as a source fidelity error.
+- If the appeal letter cites a reference that appears in BOTH the Propel document and the denial letter, this is acceptable.
+
 Evaluate this appeal letter and provide:
 
 1. OVERALL SCORE (1-10) and RATING (LOW for 1-4, MODERATE for 5-7, HIGH for 8-10)
 2. SUMMARY (2-3 sentences)
 3. DETAILED BREAKDOWN with scores and specific findings
 
-SCOPING RULES — each dimension evaluates against a SPECIFIC source:
-- propel_criteria: ONLY criteria explicitly stated in the criteria definition section above (the first ═══ section). Do NOT infer additional criteria from clinical evidence, denial letters, gold letters, or general medical knowledge. If a criterion is not written in the Propel definition, it does not belong in this section.
-- argument_structure: How well the letter rebuts the denial and follows the gold letter template structure.
-- evidence_quality: Whether clinical notes and structured data are cited with specific values and timestamps.
+Evaluation Criteria:
+- **Source Fidelity**: Did the letter use ONLY Propel-approved criteria and references? Did it appropriately reject proprietary payor criteria when applicable? Did it avoid listing/critiquing payor references unnecessarily?
+- **Propel Criteria Alignment**: ONLY criteria explicitly stated in the criteria definition section above (the first ═══ section). Do NOT infer additional criteria from clinical evidence, denial letters, gold letters, or general medical knowledge. If a criterion is not written in the Propel definition, it does not belong in this section.
+- **Argument Structure**: Does the letter systematically address and refute each payor argument? Were rebuttals applied appropriately (only when matching the denial's actual claims)?
+- **Evidence Quality**: Is clinical evidence from notes and structured data properly cited with timestamps?
+- **Formatting Compliance**: The letter should NOT contain a "Summary Table of Key Clinical Data" or similar summary table at the end. If such a table is present, flag it as a formatting error.
 
 Return ONLY valid JSON in this format:
 {{
   "overall_score": <1-10>,
   "overall_rating": "<LOW|MODERATE|HIGH>",
   "summary": "<2-3 sentence summary>",
+  "source_fidelity": {{
+    "score": <1-10>,
+    "findings": [
+      {{"status": "<correct|incorrect>", "item": "<description>"}}
+    ]
+  }},
   "propel_criteria": {{
     "score": <1-10>,
     "findings": [
@@ -455,13 +478,19 @@ Return ONLY valid JSON in this format:
   "evidence_quality": {{
     "clinical_notes": {{"score": <1-10>, "findings": [...]}},
     "structured_data": {{"score": <1-10>, "findings": [...]}}
+  }},
+  "formatting_compliance": {{
+    "score": <1-10>,
+    "findings": [
+      {{"status": "<compliant|non_compliant>", "item": "<description>"}}
+    ]
   }}
 }}'''
 
 
     def assess_appeal_strength(generated_letter, propel_definition, denial_text,
                                extracted_notes, gold_letter_text, structured_summary,
-                               scores_data=None):
+                               scores_data=None, conditional_rebuttals=None):
         """Assess the strength of a generated appeal letter."""
         print("  Running strength assessment...")
 
@@ -479,6 +508,18 @@ Return ONLY valid JSON in this format:
         else:
             clinical_scores_text = "Clinical scores not available"
 
+        # Build conditional rebuttals section for assessment
+        if conditional_rebuttals:
+            rebuttals_parts = ["═══ CONDITIONAL REBUTTALS (for evaluation) ═══",
+                               "The appeal letter should apply rebuttals ONLY when they match the payor's actual argument:"]
+            for rebuttal in conditional_rebuttals:
+                rebuttals_parts.append(f"\n## {rebuttal['name']}")
+                rebuttals_parts.append(rebuttal['text'])
+            rebuttals_parts.append("\nIf the denial includes one of these arguments and the appeal letter fails to rebut it appropriately, flag this as a deficiency. If the appeal letter applies a rebuttal for an argument the payor did NOT make, flag this as an error.")
+            conditional_rebuttals_section = "\n".join(rebuttals_parts)
+        else:
+            conditional_rebuttals_section = ""
+
         try:
             response = openai_client.chat.completions.create(
                 model="gpt-4.1",
@@ -491,7 +532,8 @@ Return ONLY valid JSON in this format:
                         extracted_clinical_data=extracted_clinical_data,
                         structured_summary=structured_summary[:3000] if structured_summary else "No structured data",
                         clinical_scores_text=clinical_scores_text,
-                        generated_letter=generated_letter
+                        generated_letter=generated_letter,
+                        conditional_rebuttals_section=conditional_rebuttals_section,
                     )}
                 ],
                 temperature=0,
@@ -528,7 +570,9 @@ Return ONLY valid JSON in this format:
         if not assessment:
             return "Assessment unavailable\n\nPlease review letter manually."
 
-        status_symbols = {"present": "✓", "could_strengthen": "△", "missing": "✗"}
+        status_symbols = {"present": "✓", "could_strengthen": "△", "missing": "✗",
+                          "correct": "✓", "incorrect": "✗",
+                          "compliant": "✓", "non_compliant": "✗"}
         lines = []
 
         lines.append(f"Overall Strength: {assessment.get('overall_score', '?')}/10 - {assessment.get('overall_rating', '?')}")
@@ -538,9 +582,17 @@ Return ONLY valid JSON in this format:
         lines.append("Detailed Breakdown:")
         lines.append("─" * 55)
 
+        # Source Fidelity
+        source = assessment.get("source_fidelity", {})
+        if source:
+            lines.append(f"SOURCE FIDELITY: {source.get('score', '?')}/10")
+            for finding in source.get("findings", []):
+                symbol = status_symbols.get(finding.get("status", ""), "?")
+                lines.append(f"  {symbol} {finding.get('item', '')}")
+
         # Propel Criteria
         propel = assessment.get("propel_criteria", {})
-        lines.append(f"PROPEL CRITERIA: {propel.get('score', '?')}/10")
+        lines.append(f"\nPROPEL CRITERIA: {propel.get('score', '?')}/10")
         for finding in propel.get("findings", []):
             symbol = status_symbols.get(finding.get("status", ""), "?")
             lines.append(f"  {symbol} {finding.get('item', '')}")
@@ -564,6 +616,14 @@ Return ONLY valid JSON in this format:
         for finding in structured.get("findings", []):
             symbol = status_symbols.get(finding.get("status", ""), "?")
             lines.append(f"  {symbol} {finding.get('item', '')}")
+
+        # Formatting Compliance
+        formatting = assessment.get("formatting_compliance", {})
+        if formatting:
+            lines.append(f"\nFORMATTING COMPLIANCE: {formatting.get('score', '?')}/10")
+            for finding in formatting.get("findings", []):
+                symbol = status_symbols.get(finding.get("status", ""), "?")
+                lines.append(f"  {symbol} {finding.get('item', '')}")
 
         lines.append("─" * 55)
         return "\n".join(lines)
@@ -632,6 +692,18 @@ Return ONLY valid JSON in this format:
     else:
         clinical_scores_section = "Clinical scores not available."
 
+    # Build conditional rebuttals section (from profile, if available)
+    conditional_rebuttals = getattr(profile, 'CONDITIONAL_REBUTTALS', [])
+    if conditional_rebuttals:
+        rebuttals_parts = ["\n# CONDITIONAL REBUTTALS - Apply ONLY if the denial matches the specific scenario"]
+        for rebuttal in conditional_rebuttals:
+            rebuttals_parts.append(f"\n## {rebuttal['name']}")
+            rebuttals_parts.append(rebuttal['text'])
+        rebuttals_parts.append("\n**IMPORTANT**: Read the denial carefully. Apply ONLY the rebuttal(s) that match the payor's actual argument. Do not apply rebuttals for arguments the payor did not make.")
+        conditional_rebuttals_section = "\n".join(rebuttals_parts)
+    else:
+        conditional_rebuttals_section = ""
+
     # Build prompt
     writer_prompt = WRITER_PROMPT.format(
         denial_letter_text=case_data["denial_text"],
@@ -642,6 +714,7 @@ Return ONLY valid JSON in this format:
         gold_letter_section=gold_letter_section,
         gold_letter_instructions=gold_letter_instructions,
         scoring_instructions=profile.WRITER_SCORING_INSTRUCTIONS,
+        conditional_rebuttals_section=conditional_rebuttals_section,
         patient_name=case_data.get("patient_name", ""),
         patient_dob=case_data.get("patient_dob", ""),
         hsp_account_id=account_id,
@@ -676,7 +749,8 @@ Return ONLY valid JSON in this format:
     assessment = assess_appeal_strength(
         letter_text, propel_def, case_data["denial_text"],
         extracted_notes, gold_text, structured_summary,
-        scores_data=case_data.get("clinical_scores")
+        scores_data=case_data.get("clinical_scores"),
+        conditional_rebuttals=conditional_rebuttals,
     )
 
     # -------------------------------------------------------------------------
