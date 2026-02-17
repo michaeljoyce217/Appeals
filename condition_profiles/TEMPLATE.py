@@ -155,3 +155,31 @@ ASSESSMENT_CRITERIA_LABEL = ""    # e.g., "PROPEL RESPIRATORY FAILURE CRITERIA"
 # def render_scores_in_docx(doc, scores_data):
 #     """Render clinical scores table/visualization in the DOCX appendix."""
 #     pass
+
+# =============================================================================
+# OPTIONAL: Conditional Rebuttals
+# =============================================================================
+
+# If this condition has specific rebuttal templates for common payor denial arguments,
+# define them here. Each rebuttal is conditionally injected into the writer and assessment
+# prompts — the LLM applies ONLY the rebuttals that match the payor's actual argument.
+#
+# Format: list of dicts, each with:
+#   "name": Display name for the rebuttal (used as section header)
+#   "trigger": One-sentence description of when to apply
+#   "text": Full rebuttal text with points and instructions
+#
+# CONDITIONAL_REBUTTALS = [
+#     {
+#         "name": "Example Rebuttal Scenario",
+#         "trigger": "Apply ONLY if the denial argues X.",
+#         "text": """Apply ONLY if the denial argues X.
+#
+# Rebuttal points:
+# 1. First rebuttal point with clinical/regulatory basis.
+# 2. Second rebuttal point.
+# 3. Third rebuttal point.
+#
+# Cite relevant clinical evidence.""",
+#     },
+# ]
