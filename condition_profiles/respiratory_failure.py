@@ -174,6 +174,16 @@ LAB_VITAL_MATCHERS = {
         "exclude": ["component", "eye", "motor", "verbal"],
         "type": "vital",
     },
+    "peep": {
+        "keywords": ["peep"],
+        "exclude": [],
+        "type": "vital",
+    },
+    "tidal_volume": {
+        "keywords": ["tidal vol"],
+        "exclude": [],
+        "type": "vital",
+    },
 }
 
 # =============================================================================
