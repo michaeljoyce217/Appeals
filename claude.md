@@ -1,13 +1,13 @@
 # DRG Appeal Engine - Master Prompt
 
-**Last Updated:** 2026-02-14
+**Last Updated:** 2026-02-17
 **Repo:** https://github.com/michaeljoyce217/SEPSIS
 
 ---
 
 ## Project Overview
 
-**Goal:** Automated generation of DRG appeal letters for condition-specific insurance denials. Currently supports sepsis (DRG 870/871/872), extensible to other conditions via condition profiles.
+**Goal:** Automated generation of DRG appeal letters for condition-specific insurance denials. Currently supports sepsis (DRG 870/871/872) and acute respiratory failure (DRG 189/190/191/207/208), extensible to other conditions via condition profiles.
 
 **Architecture:** Three-file pipeline using Azure OpenAI GPT-4.1, with pluggable condition profiles
 
@@ -24,6 +24,7 @@ SEPSIS/
 ├── condition_profiles/
 │   ├── __init__.py                   # Package init
 │   ├── sepsis.py                     # Sepsis condition profile (config + SOFA scorer + DOCX rendering)
+│   ├── respiratory_failure.py        # ARF condition profile (config + conditional rebuttals)
 │   └── TEMPLATE.py                   # Template for creating new condition profiles
 ├── data/
 │   ├── featurization_train.py        # ONE-TIME: Knowledge base ingestion (gold letters + propel)
@@ -117,6 +118,7 @@ profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
 | **Assessment** | `ASSESSMENT_CONDITION_LABEL`, `ASSESSMENT_CRITERIA_LABEL` |
 | **Clinical Scorer** (optional) | `calculate_clinical_scores()`, `write_clinical_scores_table()` |
 | **DOCX Rendering** (optional) | `format_scores_for_prompt()`, `render_scores_in_docx()`, `render_scores_status_note()` |
+| **Conditional Rebuttals** (optional) | `CONDITIONAL_REBUTTALS` (list of rebuttal dicts) |
 
 ### Dynamic Note Extraction
 
@@ -230,15 +232,22 @@ The writer prompt enforces strict language rules to prevent giving payors anythi
 - Never concede any point from the denial letter — refute or ignore, never agree
 - If data for a parameter is absent, it is omitted entirely — never mentioned or hedged
 - Every paragraph must contain at least one specific clinical value with timestamp
+- Only cite Propel-approved references — do not list or comment on the payor's cited references unless directly refuting a specific clinical claim
+- Do not include a "Summary Table of Key Clinical Data" or similar table at the end of the letter
+
+### Conditional Rebuttals
+Some conditions have specific rebuttal templates for common payor denial arguments (e.g., respiratory failure has SpO2 reading rebuttals from Dr. Gharfeh and Dr. Bourland). These are defined in the condition profile as `CONDITIONAL_REBUTTALS` and are conditionally injected into both the writer prompt and assessment prompt. The LLM applies ONLY the rebuttals that match the payor's actual argument — it does not apply rebuttals for arguments the payor did not make.
 
 ### Appeal Strength Assessment
 After letter generation, an LLM evaluates the appeal and produces:
 - **Overall score** (1-10) with LOW/MODERATE/HIGH rating
 - **Summary** (2-3 sentences explaining the score)
-- **Detailed breakdown** scoring three dimensions:
+- **Detailed breakdown** scoring five dimensions:
+  - Source Fidelity (did the letter use ONLY Propel-approved criteria and references?)
   - Propel Criteria Coverage (from: Propel definitions)
-  - Argument Structure (from: denial letter, gold template)
+  - Argument Structure (from: denial letter, gold template; rebuttals applied correctly?)
   - Evidence Quality (from: clinical notes AND structured data)
+  - Formatting Compliance (no summary table at end of letter)
 
 Each finding is marked ✓ present, △ could strengthen, or ✗ missing. The "missing" items in Evidence Quality flag specific data points that weren't cited in the letter.
 
@@ -373,6 +382,16 @@ Note: 47 note types are queried but ~20 typically have content for a given sepsi
 | Clinical Data | Epic Clarity |
 
 ---
+
+## Verification Rules
+
+After writing or modifying code in this project, verify:
+1. All referenced Unity Catalog table names use the correct `{trgt_cat}.fin_ds.fudgesicle_*` pattern.
+2. SQL queries use `USE CATALOG prod` for reading source data.
+3. Condition profile references match the `CONDITION_PROFILE` setting.
+4. LLM prompts follow assertion-only language rules — no hedging, conceding, or mentioning absent data.
+5. SOFA scoring logic uses deterministic Python, not LLM calls.
+6. Output would match the previous version unless a change was explicitly requested.
 
 ## Team
 
