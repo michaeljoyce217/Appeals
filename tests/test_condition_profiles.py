@@ -129,6 +129,94 @@ class TestSepsisProfile:
 
 
 # =============================================================================
+# Respiratory Failure Profile Completeness
+# =============================================================================
+
+class TestRespiratoryFailureProfile:
+    """Verify that condition_profiles/respiratory_failure.py has the complete interface."""
+
+    @pytest.fixture
+    def rf(self):
+        return importlib.import_module("condition_profiles.respiratory_failure")
+
+    def test_all_required_attributes_present(self, rf):
+        """RF profile should have every required attribute."""
+        missing = [attr for attr in REQUIRED_ATTRIBUTES if not hasattr(rf, attr)]
+        assert missing == [], f"RF profile missing required attributes: {missing}"
+
+    def test_validate_profile_passes(self, rf):
+        """validate_profile() should accept the RF profile."""
+        validate_profile(rf)  # Should not raise
+
+    def test_no_scorer_functions(self, rf):
+        """RF profile should NOT have clinical scorer functions (no SOFA equivalent)."""
+        assert not hasattr(rf, "calculate_clinical_scores")
+        assert not hasattr(rf, "write_clinical_scores_table")
+        assert not hasattr(rf, "format_scores_for_prompt")
+        assert not hasattr(rf, "render_scores_status_note")
+        assert not hasattr(rf, "render_scores_in_docx")
+
+    def test_clinical_scores_table_name_is_none(self, rf):
+        """CLINICAL_SCORES_TABLE_NAME should be None for ARF."""
+        assert rf.CLINICAL_SCORES_TABLE_NAME is None
+
+    def test_conditional_rebuttals_present(self, rf):
+        """RF profile should have 3 conditional rebuttals."""
+        assert hasattr(rf, "CONDITIONAL_REBUTTALS")
+        assert len(rf.CONDITIONAL_REBUTTALS) == 3
+        for rebuttal in rf.CONDITIONAL_REBUTTALS:
+            assert "name" in rebuttal
+            assert "trigger" in rebuttal
+            assert "text" in rebuttal
+
+    def test_lab_vital_matchers_includes_respiratory_params(self, rf):
+        """RF profile should have respiratory-specific LAB_VITAL_MATCHERS."""
+        assert hasattr(rf, "LAB_VITAL_MATCHERS")
+        assert "spo2" in rf.LAB_VITAL_MATCHERS
+        assert "pao2" in rf.LAB_VITAL_MATCHERS
+        assert "paco2" in rf.LAB_VITAL_MATCHERS
+        assert "fio2" in rf.LAB_VITAL_MATCHERS
+        assert "peep" in rf.LAB_VITAL_MATCHERS
+        assert "tidal_volume" in rf.LAB_VITAL_MATCHERS
+
+    def test_param_to_category_covers_respiratory_params(self, rf):
+        """PARAM_TO_CATEGORY should map respiratory-specific parameters."""
+        assert hasattr(rf, "PARAM_TO_CATEGORY")
+        assert rf.PARAM_TO_CATEGORY["spo2"] == "spo2"
+        assert rf.PARAM_TO_CATEGORY["pao2"] == "pao2"
+        assert rf.PARAM_TO_CATEGORY["paco2"] == "paco2"
+        assert rf.PARAM_TO_CATEGORY["fio2"] == "fio2"
+        assert rf.PARAM_TO_CATEGORY["peep"] == "peep"
+        assert rf.PARAM_TO_CATEGORY["tidal volume"] == "tidal_volume"
+
+    def test_param_to_category_all_have_matchers(self, rf):
+        """Every category in PARAM_TO_CATEGORY should have a LAB_VITAL_MATCHERS entry."""
+        categories = set(rf.PARAM_TO_CATEGORY.values())
+        missing = [cat for cat in categories if cat not in rf.LAB_VITAL_MATCHERS]
+        assert missing == [], f"Categories in PARAM_TO_CATEGORY without LAB_VITAL_MATCHERS: {missing}"
+
+    def test_numeric_crosscheck_helpers_present(self, rf):
+        """RF profile should have match_name and safe_float utility functions."""
+        assert hasattr(rf, "match_name")
+        assert hasattr(rf, "safe_float")
+        assert callable(rf.match_name)
+        assert callable(rf.safe_float)
+
+    def test_optional_structured_data_extras_present(self, rf):
+        """RF profile should have the optional structured data attributes."""
+        assert hasattr(rf, "DIAGNOSIS_EXAMPLES")
+        assert hasattr(rf, "STRUCTURED_DATA_SYSTEM_MESSAGE")
+
+    def test_condition_name_is_string(self, rf):
+        assert isinstance(rf.CONDITION_NAME, str)
+        assert rf.CONDITION_NAME == "respiratory_failure"
+
+    def test_drg_codes(self, rf):
+        assert isinstance(rf.DRG_CODES, list)
+        assert rf.DRG_CODES == ["189", "190", "191", "207", "208"]
+
+
+# =============================================================================
 # Two-Phase String Formatting (Prompt Assembly)
 # =============================================================================
 
