@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rebuttal Engine - Design Document</title>
+    <style>
+        :root {
+            --primary: #1e3a5f;
+            --secondary: #3d5a80;
+            --accent: #ee6c4d;
+            --light: #f7f9fc;
+            --dark: #293241;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--light);
+            color: var(--dark);
+            line-height: 1.6;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .tabs {
+            display: flex;
+            background: var(--dark);
+            padding: 0 2rem;
+            gap: 0.25rem;
+            overflow-x: auto;
+        }
+
+        .tab {
+            padding: 1rem 1.5rem;
+            background: transparent;
+            border: none;
+            color: rgba(255,255,255,0.7);
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        .tab:hover {
+            color: white;
+            background: rgba(255,255,255,0.1);
+        }
+
+        .tab.active {
+            color: white;
+            background: var(--accent);
+        }
+
+        .content {
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .panel {
+            display: none;
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        h2 {
+            color: var(--primary);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--accent);
+        }
+
+        h3 {
+            color: var(--secondary);
+            margin: 1.5rem 0 0.75rem;
+        }
+
+        p {
+            margin-bottom: 1rem;
+        }
+
+        ul, ol {
+            margin: 1rem 0 1rem 2rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        .agent-card {
+            background: var(--light);
+            border-left: 4px solid var(--accent);
+            padding: 1.25rem;
+            margin: 1rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .agent-card h4 {
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .scenario-box {
+            border: 2px solid var(--secondary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
+
+        .scenario-box h4 {
+            color: var(--accent);
+            margin-bottom: 0.75rem;
+        }
+
+        .denial-types {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
+        .denial-type {
+            background: var(--light);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+
+        .denial-type.core {
+            border-color: var(--accent);
+            background: #fff5f3;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            background: var(--accent);
+            color: white;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            margin-left: 0.5rem;
+        }
+
+        .architecture-diagram {
+            background: var(--dark);
+            color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+            white-space: pre;
+            line-height: 1.4;
+        }
+
+        .meta {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Rebuttal Engine</h1>
+        <p>Multi-Agent Denial Appeal System for Mercy Hospital</p>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="architecture">Architecture</button>
+        <button class="tab" data-tab="agents">Agents</button>
+        <button class="tab" data-tab="knowledge">Knowledge Layer</button>
+        <button class="tab" data-tab="scenarios">Subscription Scenarios</button>
+        <button class="tab" data-tab="roadmap">Roadmap</button>
+    </nav>
+
+    <main class="content">
+        <!-- Overview Panel -->
+        <section id="overview" class="panel active">
+            <p class="meta">Design Document | December 17, 2025 | Branch: design/rebuttal-engine</p>
+
+            <h2>Executive Summary</h2>
+            <p>
+                The <strong>Rebuttal Engine</strong> is a multi-agent system that transforms denial letter processing
+                from single-issue, single-diagnosis handling into a comprehensive, extensible denial appeal platform.
+            </p>
+
+            <h3>The Problem</h3>
+            <p>
+                Current state: One denial type (sepsis DRG downgrade) handled per letter with manual regex extraction.
+                Reality: Denial letters often contain <strong>multiple denial reasons</strong> across different categories.
+            </p>
+
+            <h3>The Solution</h3>
+            <p>
+                A three-agent pipeline that:
+            </p>
+            <ul>
+                <li>Parses denial letters to identify <strong>all</strong> denial types present</li>
+                <li>Gathers relevant clinical/regulatory criteria for each denial type</li>
+                <li>Composes a unified, multi-issue appeal letter addressing all denials</li>
+            </ul>
+
+            <h3>Key Design Decisions</h3>
+            <ul>
+                <li><strong>Hybrid Knowledge Layer:</strong> Structured templates for known denial types + vector store for reference documents</li>
+                <li><strong>Extensible by Design:</strong> Handle major denial categories out of the box, discover and add new types dynamically</li>
+                <li><strong>Documentation-first:</strong> Prioritize auditability and control over pure speed</li>
+            </ul>
+        </section>
+
+        <!-- Architecture Panel -->
+        <section id="architecture" class="panel">
+            <h2>System Architecture</h2>
+
+            <div class="architecture-diagram">
+                                    REBUTTAL ENGINE - DATA FLOW
+    ============================================================
+
+    [Denial Letter]          [Clinical Records]
+          |                         |
+          v                         |
+    +------------------+            |
+    | DENIAL PARSER    |            |
+    | AGENT            |            |
+    +------------------+            |
+          |                         |
+          | denial_types[]          |
+          v                         v
+    +----------------------------------+
+    |       CRITERIA GATHERER          |
+    |            AGENT                 |
+    +----------------------------------+
+    | - Queries structured templates   |
+    | - Searches vector store          |
+    | - Retrieves CMS/MCG/InterQual    |
+    +----------------------------------+
+          |
+          | criteria_bundle{}
+          v
+    +----------------------------------+
+    |        APPEAL WRITER             |
+    |            AGENT                 |
+    +----------------------------------+
+    | - Merges clinical evidence       |
+    | - Addresses each denial type     |
+    | - Follows letter templates       |
+    +----------------------------------+
+          |
+          v
+    [Multi-Issue Appeal Letter]
+          |
+          v
+    [HTML Report with Tabs]
+            </div>
+
+            <h3>Why Three Agents?</h3>
+            <p>
+                Separation of concerns enables:
+            </p>
+            <ul>
+                <li><strong>Modularity:</strong> Each agent can be improved independently</li>
+                <li><strong>Testability:</strong> Parser accuracy, criteria relevance, and letter quality can be measured separately</li>
+                <li><strong>Extensibility:</strong> New denial types only require updating the Criteria Gatherer's knowledge base</li>
+            </ul>
+        </section>
+
+        <!-- Agents Panel -->
+        <section id="agents" class="panel">
+            <h2>Agent Specifications</h2>
+
+            <div class="agent-card">
+                <h4>1. Denial Parser Agent</h4>
+                <p><strong>Input:</strong> Denial letter (PDF/DOCX text)</p>
+                <p><strong>Output:</strong> Structured list of denial types with extracted metadata</p>
+                <p><strong>Responsibilities:</strong></p>
+                <ul>
+                    <li>Identify all denial reasons present in the letter</li>
+                    <li>Extract: denial date, reviewer name, payor organization, original/proposed DRGs</li>
+                    <li>Extract specific rationale quotes for each denial</li>
+                    <li>Flag unknown denial types for human review</li>
+                </ul>
+            </div>
+
+            <div class="agent-card">
+                <h4>2. Criteria Gatherer Agent</h4>
+                <p><strong>Input:</strong> List of denial types + patient clinical data</p>
+                <p><strong>Output:</strong> Criteria bundle with relevant guidelines per denial type</p>
+                <p><strong>Responsibilities:</strong></p>
+                <ul>
+                    <li>Query structured templates for known denial types</li>
+                    <li>Search vector store for supporting documentation</li>
+                    <li>Retrieve applicable CMS regulations, MCG guidelines, clinical criteria</li>
+                    <li>Match patient clinical evidence to criteria requirements</li>
+                </ul>
+            </div>
+
+            <div class="agent-card">
+                <h4>3. Appeal Writer Agent</h4>
+                <p><strong>Input:</strong> Criteria bundle + clinical records + denial metadata</p>
+                <p><strong>Output:</strong> Complete multi-issue appeal letter (DOCX) + HTML report</p>
+                <p><strong>Responsibilities:</strong></p>
+                <ul>
+                    <li>Structure letter to address each denial type coherently</li>
+                    <li>Cite specific clinical evidence matching each criterion</li>
+                    <li>Include regulatory references with edition/section numbers</li>
+                    <li>Follow Mercy Hospital letter templates and formatting</li>
+                </ul>
+            </div>
+        </section>
+
+        <!-- Knowledge Layer Panel -->
+        <section id="knowledge" class="panel">
+            <h2>Hybrid Knowledge Layer</h2>
+
+            <h3>Structured Templates (Fast, Reliable)</h3>
+            <p>Pre-built templates for high-volume denial types:</p>
+            <div class="denial-types">
+                <div class="denial-type core">
+                    <strong>Sepsis DRG</strong><br>
+                    <small>Downgrade</small>
+                    <span class="badge">V1</span>
+                </div>
+                <div class="denial-type core">
+                    <strong>Two-Midnight</strong><br>
+                    <small>Rule Violation</small>
+                    <span class="badge">V1</span>
+                </div>
+                <div class="denial-type core">
+                    <strong>Medical Necessity</strong><br>
+                    <small>Inpatient Denial</small>
+                    <span class="badge">V1</span>
+                </div>
+                <div class="denial-type core">
+                    <strong>Clinical Validation</strong><br>
+                    <small>Documentation</small>
+                    <span class="badge">V1</span>
+                </div>
+                <div class="denial-type core">
+                    <strong>Level of Care</strong><br>
+                    <small>Obs vs Inpatient</small>
+                    <span class="badge">V1</span>
+                </div>
+                <div class="denial-type">
+                    <strong>New Types</strong><br>
+                    <small>Discovered dynamically</small>
+                </div>
+            </div>
+
+            <h3>Vector Store (Flexible, Comprehensive)</h3>
+            <p>Searchable repository of reference documents:</p>
+            <ul>
+                <li>MCG Care Guidelines (ingested from subscription)</li>
+                <li>CMS Regulations (Two-Midnight Rule, coverage determinations)</li>
+                <li>InterQual Criteria</li>
+                <li>Clinical criteria (Sepsis-2, Sepsis-3, SIRS, SOFA)</li>
+                <li>Historical winning appeal letters (anonymized)</li>
+            </ul>
+
+            <h3>Why Hybrid?</h3>
+            <ul>
+                <li><strong>Templates:</strong> Ensure consistency and speed for known patterns</li>
+                <li><strong>Vector Store:</strong> Handle edge cases and provide citable references</li>
+                <li><strong>Extensibility:</strong> New denial types start in vector store, graduate to templates when patterns emerge</li>
+            </ul>
+        </section>
+
+        <!-- Scenarios Panel -->
+        <section id="scenarios" class="panel">
+            <h2>Subscription Service Scenarios</h2>
+            <p>Two approaches depending on what the subscription service offers:</p>
+
+            <div class="scenario-box">
+                <h4>Scenario A: API-Based Service (Query-Response)</h4>
+                <p><strong>How it works:</strong> Criteria Gatherer calls external API with denial type + diagnosis, gets back relevant guidelines.</p>
+                <p><strong>Advantages:</strong></p>
+                <ul>
+                    <li>Always up-to-date criteria</li>
+                    <li>Tailored responses per query</li>
+                    <li>Direct citation linking</li>
+                </ul>
+                <p><strong>Considerations:</strong></p>
+                <ul>
+                    <li>Per-query costs</li>
+                    <li>Network dependency</li>
+                    <li>Need caching layer for common queries</li>
+                    <li>Fallback to local knowledge if API unavailable</li>
+                </ul>
+            </div>
+
+            <div class="scenario-box">
+                <h4>Scenario B: Documentation Subscription (Periodic Updates)</h4>
+                <p><strong>How it works:</strong> Receive document updates (monthly/quarterly), ingest into vector store, query locally.</p>
+                <p><strong>Advantages:</strong></p>
+                <ul>
+                    <li>Full control and auditability</li>
+                    <li>No per-query costs after ingestion</li>
+                    <li>Works offline</li>
+                    <li>Can track changes over time</li>
+                </ul>
+                <p><strong>Considerations:</strong></p>
+                <ul>
+                    <li>Need ingestion pipeline for updates</li>
+                    <li>Version management</li>
+                    <li>Storage for vector embeddings</li>
+                </ul>
+                <p><strong>Recommendation:</strong> This is the preferred approach for auditability and control.</p>
+            </div>
+        </section>
+
+        <!-- Roadmap Panel -->
+        <section id="roadmap" class="panel">
+            <h2>Implementation Roadmap</h2>
+
+            <h3>Phase 1: Foundation</h3>
+            <ul>
+                <li>Identify and secure access to subscription service</li>
+                <li>Build Denial Parser Agent with multi-type detection</li>
+                <li>Create structured templates for 5 core denial types</li>
+                <li>Establish vector store infrastructure</li>
+            </ul>
+
+            <h3>Phase 2: Integration</h3>
+            <ul>
+                <li>Build Criteria Gatherer with hybrid lookup</li>
+                <li>Ingest subscription documents into vector store</li>
+                <li>Connect to existing clinical data pipeline (featurization.py)</li>
+            </ul>
+
+            <h3>Phase 3: Generation</h3>
+            <ul>
+                <li>Build Appeal Writer Agent</li>
+                <li>Create multi-issue letter templates</li>
+                <li>Generate HTML tabbed reports</li>
+                <li>DOCX output formatting</li>
+            </ul>
+
+            <h3>Phase 4: Production</h3>
+            <ul>
+                <li>Integration with Databricks pipeline</li>
+                <li>Monitoring and logging</li>
+                <li>Feedback loop for template refinement</li>
+                <li>Dynamic discovery of new denial types</li>
+            </ul>
+
+            <h3>Open Questions</h3>
+            <ul>
+                <li>What subscription service does the denials team use?</li>
+                <li>API access or document-based?</li>
+                <li>Update frequency?</li>
+                <li>Licensing for ingestion into vector store?</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        Rebuttal Engine Design Document | Mercy Hospital | Generated December 17, 2025
+    </footer>
+
+    <script>
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active from all tabs and panels
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+
+                // Add active to clicked tab and corresponding panel
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab).classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

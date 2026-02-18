@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rebuttal Engine v2 - Design Document</title>
+    <style>
+        :root {
+            --primary: #1e3a5f;
+            --secondary: #3d5a80;
+            --accent: #ee6c4d;
+            --light: #f7f9fc;
+            --dark: #293241;
+            --success: #2a9d8f;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--light);
+            color: var(--dark);
+            line-height: 1.6;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .version-badge {
+            display: inline-block;
+            background: var(--accent);
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
+
+        .tabs {
+            display: flex;
+            background: var(--dark);
+            padding: 0 2rem;
+            gap: 0.25rem;
+            overflow-x: auto;
+        }
+
+        .tab {
+            padding: 1rem 1.5rem;
+            background: transparent;
+            border: none;
+            color: rgba(255,255,255,0.7);
+            cursor: pointer;
+            font-size: 0.95rem;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+
+        .tab:hover {
+            color: white;
+            background: rgba(255,255,255,0.1);
+        }
+
+        .tab.active {
+            color: white;
+            background: var(--accent);
+        }
+
+        .content {
+            max-width: 1000px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .panel {
+            display: none;
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .panel.active {
+            display: block;
+        }
+
+        h2 {
+            color: var(--primary);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--accent);
+        }
+
+        h3 {
+            color: var(--secondary);
+            margin: 1.5rem 0 0.75rem;
+        }
+
+        h4 {
+            color: var(--primary);
+            margin: 1rem 0 0.5rem;
+        }
+
+        p {
+            margin-bottom: 1rem;
+        }
+
+        ul, ol {
+            margin: 1rem 0 1rem 2rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        .agent-card {
+            background: var(--light);
+            border-left: 4px solid var(--accent);
+            padding: 1.25rem;
+            margin: 1rem 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .agent-card h4 {
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .agent-card .io-section {
+            background: white;
+            padding: 1rem;
+            border-radius: 4px;
+            margin: 0.75rem 0;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+        }
+
+        .pipeline-diagram {
+            background: var(--dark);
+            color: white;
+            padding: 2rem;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+            white-space: pre;
+            line-height: 1.4;
+        }
+
+        .code-block {
+            background: var(--dark);
+            color: #e0e0e0;
+            padding: 1.5rem;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        .code-block .keyword { color: #ff79c6; }
+        .code-block .string { color: #f1fa8c; }
+        .code-block .comment { color: #6272a4; }
+        .code-block .type { color: #8be9fd; }
+
+        .table-schema {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+
+        .table-schema th {
+            background: var(--primary);
+            color: white;
+            padding: 0.75rem;
+            text-align: left;
+        }
+
+        .table-schema td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .table-schema tr:nth-child(even) {
+            background: var(--light);
+        }
+
+        .filter-badge {
+            display: inline-block;
+            background: var(--success);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            margin-left: 0.5rem;
+        }
+
+        .scope-toggle {
+            background: var(--light);
+            border: 2px solid var(--secondary);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
+
+        .scope-toggle h4 {
+            margin-bottom: 1rem;
+        }
+
+        .toggle-options {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .toggle-option {
+            flex: 1;
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .toggle-option.active {
+            background: var(--success);
+            color: white;
+        }
+
+        .toggle-option.inactive {
+            background: #ddd;
+            color: #666;
+        }
+
+        .workflow-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: var(--light);
+            border-radius: 8px;
+        }
+
+        .step-number {
+            background: var(--accent);
+            color: white;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            flex-shrink: 0;
+        }
+
+        .step-content h4 {
+            margin: 0 0 0.5rem 0;
+        }
+
+        .meta {
+            color: #666;
+            font-size: 0.9rem;
+            margin-bottom: 2rem;
+        }
+
+        .success-criteria {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
+        .criteria-card {
+            background: var(--light);
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+            border-top: 4px solid var(--accent);
+        }
+
+        .criteria-card.goal {
+            border-top-color: var(--success);
+        }
+
+        .criteria-card h5 {
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .json-preview {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 1rem;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.8rem;
+            overflow-x: auto;
+            margin: 0.5rem 0;
+        }
+
+        .json-preview .key { color: #9cdcfe; }
+        .json-preview .string { color: #ce9178; }
+        .json-preview .number { color: #b5cea8; }
+        .json-preview .boolean { color: #569cd6; }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .highlight-box {
+            background: #fff5f3;
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+
+        .highlight-box h4 {
+            color: var(--accent);
+            margin-bottom: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Rebuttal Engine v2</h1>
+        <p>Multi-Agent Pipeline Emulating Human Expert Workflow</p>
+        <span class="version-badge">Sepsis POC with General Architecture</span>
+    </header>
+
+    <nav class="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="workflow">Human Workflow</button>
+        <button class="tab" data-tab="architecture">Architecture</button>
+        <button class="tab" data-tab="agents">Agents</button>
+        <button class="tab" data-tab="knowledge">Knowledge Layer</button>
+        <button class="tab" data-tab="output">Output Format</button>
+        <button class="tab" data-tab="next">Next Steps</button>
+    </nav>
+
+    <main class="content">
+        <!-- Overview Panel -->
+        <section id="overview" class="panel active">
+            <p class="meta">Design Document | December 19, 2025 | Branch: initial_efforts_sepsis_only</p>
+
+            <h2>Executive Summary</h2>
+            <p>
+                The <strong>Rebuttal Engine v2</strong> is a four-agent sequential pipeline that emulates how human
+                experts write denial appeal letters. Rather than using distilled knowledge, we go to the source:
+                reading denial letters, researching clinical criteria (Propel), referencing gold standard letters,
+                and generating complete appeals.
+            </p>
+
+            <h3>Design Philosophy</h3>
+            <div class="highlight-box">
+                <h4>Incrementalism in AI</h4>
+                <p>Build the architecture for full generality (any denial type, any condition), but constrain scope
+                with a "sepsis only" filter for the initial POC. The filter can be toggled off later to handle all denials.</p>
+            </div>
+
+            <h3>Success Criteria</h3>
+            <div class="success-criteria">
+                <div class="criteria-card goal">
+                    <h5>Goal</h5>
+                    <p>Complete letter ready to send with minimal human edits</p>
+                </div>
+                <div class="criteria-card">
+                    <h5>Minimum</h5>
+                    <p>Strong draft requiring light review before sending</p>
+                </div>
+                <div class="criteria-card">
+                    <h5>Always</h5>
+                    <p>Human in the loop for final approval</p>
+                </div>
+            </div>
+
+            <h3>Key Decisions Made</h3>
+            <ul>
+                <li><strong>Sequential Pipeline:</strong> Four specialized agents, output of one feeds the next</li>
+                <li><strong>Hybrid Retrieval:</strong> Structured filters (DRG, tags) + vector search for best matches</li>
+                <li><strong>Flexible Schema:</strong> Tags and metadata maps instead of fixed columns</li>
+                <li><strong>Template Fallback:</strong> Use gold standard letters when available, template when not</li>
+            </ul>
+        </section>
+
+        <!-- Workflow Panel -->
+        <section id="workflow" class="panel">
+            <h2>Human Expert Workflow</h2>
+            <p>This system emulates the exact process human reviewers follow:</p>
+
+            <div class="workflow-step">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <h4>Read the Denial Letter</h4>
+                    <p>Identify what the denial(s) are, extract key information like denial date,
+                    reviewer name, payor, claim reference numbers, and specific arguments made.</p>
+                </div>
+            </div>
+
+            <div class="workflow-step">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <h4>Research the Subscription (Propel)</h4>
+                    <p>Look up all documentation related to the denied conditions or procedures.
+                    Find clinical criteria, coding guidelines, and regulatory references that support the appeal.</p>
+                </div>
+            </div>
+
+            <div class="workflow-step">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <h4>Reference Gold Standard Letters</h4>
+                    <p>Check the library of successful rebuttal letters. Find cases similar to the current
+                    denial and use them as a foundation. Fall back to template if no good match exists.</p>
+                </div>
+            </div>
+
+            <div class="workflow-step">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <h4>Write the Rebuttal Letter</h4>
+                    <p>Compose the appeal letter addressing each denial argument, citing clinical evidence
+                    from the patient record and supporting criteria from Propel.</p>
+                </div>
+            </div>
+
+            <h3>Scope Filter</h3>
+            <div class="scope-toggle">
+                <h4>Current POC Configuration</h4>
+                <div class="toggle-options">
+                    <div class="toggle-option active">
+                        <strong>Sepsis Only</strong>
+                        <p>Single-issue sepsis denials</p>
+                    </div>
+                    <div class="toggle-option inactive">
+                        <strong>All Denials</strong>
+                        <p>Any denial type (future)</p>
+                    </div>
+                </div>
+            </div>
+
+            <p>The sepsis filter validates at Step 1. If the denial isn't sepsis-related, the pipeline
+            exits early with an "out of scope" flag. This filter can be toggled off once we're ready
+            to handle all denial types.</p>
+        </section>
+
+        <!-- Architecture Panel -->
+        <section id="architecture" class="panel">
+            <h2>System Architecture</h2>
+
+            <div class="pipeline-diagram">
+                          REBUTTAL ENGINE v2 - SEQUENTIAL PIPELINE
+    ================================================================
+
+    Config: { scope_filter: "sepsis" | "all" }
+
+                        KNOWLEDGE LAYER (queried by agents)
+    ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+    │    Reference    │    │  Gold Standard  │    │ Mercy Template  │
+    │    Documents    │    │    Letters      │    │   (Fallback)    │
+    │    (Propel)     │    │                 │    │                 │
+    └────────┬────────┘    └────────┬────────┘    └────────┬────────┘
+             │                      │                      │
+             └──────────┬───────────┴───────────┬──────────┘
+                        │                       │
+                        ▼                       ▼
+    ┌────────────────────────────────────────────────────────────┐
+    │                                                            │
+    │   [Denial Letter]     [Clinical Notes]     [Patient Data]  │
+    │         │                    │                   │         │
+    │         v                    │                   │         │
+    │   ┌──────────┐               │                   │         │
+    │   │  PARSER  │               │                   │         │
+    │   │  AGENT   │               │                   │         │
+    │   └────┬─────┘               │                   │         │
+    │        │ denial_info         │                   │         │
+    │        v                     v                   │         │
+    │   ┌──────────┐               │                   │         │
+    │   │ RESEARCH │◄──── queries Reference Docs      │         │
+    │   │  AGENT   │               │                   │         │
+    │   └────┬─────┘               │                   │         │
+    │        │ criteria_found      │                   │         │
+    │        v                     │                   │         │
+    │   ┌──────────┐               │                   │         │
+    │   │REFERENCE │◄──── queries Gold Letters        │         │
+    │   │  AGENT   │                                   │         │
+    │   └────┬─────┘                                   │         │
+    │        │ gold_letter                             │         │
+    │        v                                         v         │
+    │   ┌──────────┐                                   │         │
+    │   │  WRITER  │◄──── uses Template as fallback   │         │
+    │   │  AGENT   │◄──────────────────────────────────┘         │
+    │   └────┬─────┘                                             │
+    │        │                                                   │
+    │        v                                                   │
+    │   [Final Letter]                                           │
+    │                                                            │
+    └────────────────────────────────────────────────────────────┘
+            </div>
+
+            <h3>Infrastructure</h3>
+            <table class="table-schema">
+                <tr>
+                    <th>Component</th>
+                    <th>Technology</th>
+                </tr>
+                <tr>
+                    <td>Platform</td>
+                    <td>Databricks on Azure</td>
+                </tr>
+                <tr>
+                    <td>LLM</td>
+                    <td>Azure OpenAI GPT-4.1 via API key</td>
+                </tr>
+                <tr>
+                    <td>Storage</td>
+                    <td>Delta tables in Unity Catalog</td>
+                </tr>
+                <tr>
+                    <td>Vectors</td>
+                    <td>Databricks Vector Search / cosine similarity UDF</td>
+                </tr>
+                <tr>
+                    <td>Secrets</td>
+                    <td>Databricks secrets (idp_etl scope)</td>
+                </tr>
+            </table>
+
+            <h3>Data Flow (Production)</h3>
+            <div class="code-block">
+Sepsis Workqueue (Epic, workqueue_id: 1315223)
+    │
+    v
+[featurization.py] ─── Pulls clinical data from Epic Clarity
+    │
+    v
+fudgesicle_inference table
+    │
+    v
+[REBUTTAL ENGINE] ──── Four-agent pipeline
+    │
+    v
+fudgesicle_inference_score table
+            </div>
+        </section>
+
+        <!-- Agents Panel -->
+        <section id="agents" class="panel">
+            <h2>Agent Specifications</h2>
+
+            <div class="agent-card">
+                <h4>1. Parser Agent <span class="filter-badge">Scope Filter Applied</span></h4>
+                <p><strong>Purpose:</strong> Read the denial letter and extract structured denial information.</p>
+                <p><strong>Input:</strong> denial_letter_text (string from PDF/DOCX)</p>
+                <div class="io-section">
+                    <strong>Output Schema:</strong>
+                    <div class="json-preview">
+{
+  <span class="key">"denial_date"</span>: <span class="string">"2024-03-15"</span>,
+  <span class="key">"payer_name"</span>: <span class="string">"UnitedHealthcare"</span>,
+  <span class="key">"reviewer_name"</span>: <span class="string">"Dr. Jane Smith, MD"</span>,
+  <span class="key">"original_drg"</span>: <span class="string">"871"</span>,
+  <span class="key">"proposed_drg"</span>: <span class="string">"872"</span>,
+  <span class="key">"administrative_data"</span>: {
+    <span class="key">"claim_reference_number"</span>: <span class="string">"CLM-2024-123456"</span>,
+    <span class="key">"member_id"</span>: <span class="string">"U123456789"</span>,
+    <span class="key">"authorization_number"</span>: <span class="string">"AUTH-789012"</span>,
+    <span class="key">"other_identifiers"</span>: { ... }
+  },
+  <span class="key">"denial_reasons"</span>: [{
+    <span class="key">"type"</span>: <span class="string">"clinical_validation"</span>,
+    <span class="key">"summary"</span>: <span class="string">"Documentation does not support severe sepsis"</span>,
+    <span class="key">"specific_arguments"</span>: [...]
+  }],
+  <span class="key">"is_sepsis_related"</span>: <span class="boolean">true</span>,
+  <span class="key">"is_single_issue"</span>: <span class="boolean">true</span>
+}
+                    </div>
+                </div>
+                <p><strong>Scope Filter Logic:</strong> If scope_filter="sepsis" and is_sepsis_related=false, exit early.</p>
+            </div>
+
+            <div class="agent-card">
+                <h4>2. Research Agent</h4>
+                <p><strong>Purpose:</strong> Find relevant clinical criteria from Propel/reference documents.</p>
+                <p><strong>Input:</strong> denial_info + clinical_notes</p>
+                <p><strong>Process:</strong></p>
+                <ol>
+                    <li>Build search query from denial reasons + DRG codes</li>
+                    <li>Structured filter: Narrow by tags (e.g., WHERE 'sepsis' IN tags)</li>
+                    <li>Vector search: Semantic similarity within filtered set</li>
+                    <li>LLM synthesis: Extract relevant criteria from top matches</li>
+                </ol>
+                <div class="io-section">
+                    <strong>Output:</strong> relevant_criteria[], suggested_arguments[]
+                </div>
+            </div>
+
+            <div class="agent-card">
+                <h4>3. Reference Agent</h4>
+                <p><strong>Purpose:</strong> Find best matching gold standard rebuttal letters.</p>
+                <p><strong>Input:</strong> denial_info + relevant_criteria</p>
+                <p><strong>Process:</strong></p>
+                <ol>
+                    <li>Structured filter: By tags matching denial type + condition</li>
+                    <li>Vector search: Match on denial arguments and clinical scenario</li>
+                    <li>LLM evaluation: Score top candidates for relevance</li>
+                    <li>Fallback: If no good match (score &lt; 0.7), flag to use template</li>
+                </ol>
+                <div class="io-section">
+                    <strong>Output:</strong> matched_letters[], use_template_fallback, fallback_reason
+                </div>
+            </div>
+
+            <div class="agent-card">
+                <h4>4. Writer Agent</h4>
+                <p><strong>Purpose:</strong> Generate the final rebuttal letter.</p>
+                <p><strong>Input:</strong> denial_info + criteria + gold_letters + clinical_notes + patient_data</p>
+                <p><strong>Process:</strong></p>
+                <ol>
+                    <li>Select foundation: Best matched gold letter OR template</li>
+                    <li>Adapt to case: Incorporate patient-specific clinical evidence</li>
+                    <li>Apply criteria: Cite Propel criteria supporting arguments</li>
+                    <li>Personalize: Address specific denial arguments point-by-point</li>
+                    <li>Format: Output matching Mercy template structure</li>
+                </ol>
+                <div class="io-section">
+                    <strong>Output:</strong> Structured letter JSON + citations_used[] + confidence_score
+                </div>
+            </div>
+        </section>
+
+        <!-- Knowledge Layer Panel -->
+        <section id="knowledge" class="panel">
+            <h2>Knowledge Layer</h2>
+            <p>Two Delta tables with flexible schemas to support any denial type:</p>
+
+            <h3>Table 1: Reference Documents</h3>
+            <p>Stores clinical criteria from Propel and other sources.</p>
+            <table class="table-schema">
+                <tr>
+                    <th>Column</th>
+                    <th>Type</th>
+                    <th>Purpose</th>
+                </tr>
+                <tr>
+                    <td>doc_id</td>
+                    <td>STRING</td>
+                    <td>Unique identifier</td>
+                </tr>
+                <tr>
+                    <td>filename</td>
+                    <td>STRING</td>
+                    <td>Original file name</td>
+                </tr>
+                <tr>
+                    <td>source</td>
+                    <td>STRING</td>
+                    <td>'propel', 'interqual', 'cms', 'internal'</td>
+                </tr>
+                <tr>
+                    <td>doc_type</td>
+                    <td>STRING</td>
+                    <td>'clinical_criteria', 'coding_guidelines', 'policy'</td>
+                </tr>
+                <tr>
+                    <td>tags</td>
+                    <td>ARRAY&lt;STRING&gt;</td>
+                    <td>Flexible: ['sepsis', 'drg_871', 'organ_dysfunction']</td>
+                </tr>
+                <tr>
+                    <td>section_title</td>
+                    <td>STRING</td>
+                    <td>Section heading</td>
+                </tr>
+                <tr>
+                    <td>section_text</td>
+                    <td>STRING</td>
+                    <td>Content text</td>
+                </tr>
+                <tr>
+                    <td>embedding_vector</td>
+                    <td>ARRAY&lt;FLOAT&gt;</td>
+                    <td>For semantic search</td>
+                </tr>
+                <tr>
+                    <td>metadata</td>
+                    <td>MAP&lt;STRING, STRING&gt;</td>
+                    <td>Flexible key-value pairs</td>
+                </tr>
+            </table>
+
+            <h3>Table 2: Gold Standard Letters</h3>
+            <p>Stores the library of successful rebuttal letters.</p>
+            <table class="table-schema">
+                <tr>
+                    <th>Column</th>
+                    <th>Type</th>
+                    <th>Purpose</th>
+                </tr>
+                <tr>
+                    <td>letter_id</td>
+                    <td>STRING</td>
+                    <td>Unique identifier</td>
+                </tr>
+                <tr>
+                    <td>tags</td>
+                    <td>ARRAY&lt;STRING&gt;</td>
+                    <td>Flexible: ['sepsis', 'clinical_validation', 'drg_downgrade']</td>
+                </tr>
+                <tr>
+                    <td>payer</td>
+                    <td>STRING</td>
+                    <td>Optional payer name</td>
+                </tr>
+                <tr>
+                    <td>letter_text</td>
+                    <td>STRING</td>
+                    <td>Full letter content</td>
+                </tr>
+                <tr>
+                    <td>key_arguments</td>
+                    <td>ARRAY&lt;STRING&gt;</td>
+                    <td>Extracted argument summaries</td>
+                </tr>
+                <tr>
+                    <td>embedding_vector</td>
+                    <td>ARRAY&lt;FLOAT&gt;</td>
+                    <td>For semantic search</td>
+                </tr>
+                <tr>
+                    <td>metadata</td>
+                    <td>MAP&lt;STRING, STRING&gt;</td>
+                    <td>original_drg, proposed_drg, specialty, etc.</td>
+                </tr>
+                <tr>
+                    <td>outcome</td>
+                    <td>STRING</td>
+                    <td>'won', 'lost', 'pending' (for future learning)</td>
+                </tr>
+            </table>
+
+            <h3>Hybrid Retrieval Strategy</h3>
+            <div class="highlight-box">
+                <h4>Why Hybrid?</h4>
+                <ul>
+                    <li><strong>Structured filters first:</strong> DRG codes and denial types are precise - a sepsis denial shouldn't pull appendectomy letters</li>
+                    <li><strong>Vector search within results:</strong> Once filtered, semantic similarity finds the best content matches</li>
+                    <li><strong>Result:</strong> Precision (right category) + Relevance (best content)</li>
+                </ul>
+            </div>
+
+            <h3>Why Vector Search?</h3>
+            <div class="highlight-box">
+                <h4>Scalability Before LLM Evaluation</h4>
+                <p>Vector search is a <strong>filtering step</strong> that runs before the LLM evaluates candidates:</p>
+                <ul>
+                    <li>We may have <strong>1,000+ gold standard letters</strong> in the library</li>
+                    <li>Sending all of them to GPT-4.1 for every case would be expensive, slow, and exceed token limits</li>
+                    <li>Vector search quickly narrows to the <strong>top 5-10 most similar candidates</strong> (~10ms)</li>
+                    <li>Then the LLM evaluates just those candidates in detail (~3s)</li>
+                </ul>
+            </div>
+            <div class="code-block">
+The retrieval flow:
+
+1,000 letters ──► [Vector Search: ~10ms] ──► 5-10 candidates ──► [LLM Eval: ~3s] ──► best match
+
+Without this step, you'd either:
+  • Hit token limits (can't fit 1,000 letters in context)
+  • Pay for massive context windows on every case
+  • Wait minutes instead of seconds per case
+            </div>
+
+            <h3>Embedding Strategy</h3>
+            <ul>
+                <li><strong>Model:</strong> Azure OpenAI text-embedding-ada-002</li>
+                <li><strong>Reference docs:</strong> Embed section_text</li>
+                <li><strong>Gold letters:</strong> Embed letter_text + key_arguments</li>
+            </ul>
+        </section>
+
+        <!-- Output Format Panel -->
+        <section id="output" class="panel">
+            <h2>Output Format</h2>
+            <p>The Writer Agent produces structured output matching the Mercy Hospital template:</p>
+
+            <div class="json-preview" style="font-size: 0.75rem;">
+{
+  <span class="key">"letter"</span>: {
+    <span class="key">"mercy_header"</span>: {
+      <span class="key">"address"</span>: <span class="string">"Mercy Hospital\nPayor Audits & Denials Dept..."</span>,
+      <span class="key">"date"</span>: <span class="string">"12/19/2024"</span>
+    },
+    <span class="key">"payor_address"</span>: <span class="string">"Extracted from denial letter"</span>,
+    <span class="key">"appeal_level"</span>: <span class="string">"First Level Appeal"</span>,
+    <span class="key">"patient_info"</span>: {
+      <span class="key">"beneficiary_name"</span>: <span class="string">"John Smith"</span>,
+      <span class="key">"dob"</span>: <span class="string">"01/15/1960"</span>,
+      <span class="key">"claim_reference"</span>: <span class="string">"CLM-2024-123456"</span>,
+      <span class="key">"hospital_account"</span>: <span class="string">"987654321"</span>,
+      <span class="key">"date_of_service"</span>: <span class="string">"02/28/2024 - 03/05/2024"</span>
+    },
+    <span class="key">"salutation"</span>: <span class="string">"Dear Dr. Jane Smith:"</span>,
+    <span class="key">"opening_paragraph"</span>: <span class="string">"Mercy Hospital Springfield is in receipt..."</span>,
+    <span class="key">"justification"</span>: <span class="string">"..."</span>,
+    <span class="key">"rationale"</span>: {
+      <span class="key">"payor_argument"</span>: <span class="string">"UnitedHealthcare seeks to remove..."</span>,
+      <span class="key">"infection_source"</span>: <span class="string">"Pneumonia, confirmed by chest X-ray..."</span>,
+      <span class="key">"organ_dysfunction"</span>: [...],
+      <span class="key">"sirs_criteria"</span>: [...],
+      <span class="key">"inflammatory_markers"</span>: [...],
+      <span class="key">"other_conditions"</span>: [...]
+    },
+    <span class="key">"hospital_course"</span>: <span class="string">"Narrative text..."</span>,
+    <span class="key">"summary_paragraph"</span>: <span class="string">"Our patient was admitted for 5 days..."</span>,
+    <span class="key">"conclusion"</span>: <span class="string">"We anticipate original DRG 871 will be approved."</span>,
+    <span class="key">"contact_info"</span>: <span class="string">"Fax: 314-364-6231..."</span>,
+    <span class="key">"signature_block"</span>: <span class="string">"Clinical Appeals Specialist..."</span>
+  },
+  <span class="key">"citations_used"</span>: [...],
+  <span class="key">"gold_letter_used"</span>: <span class="string">"GS-2024-087"</span>,
+  <span class="key">"confidence_score"</span>: <span class="number">0.88</span>
+}
+            </div>
+
+            <h3>Template Sections</h3>
+            <p>Based on the SME-approved template in utils/sepsis_template.docx:</p>
+            <ul>
+                <li>Mercy Hospital header with return address</li>
+                <li>Payor address (extracted from denial letter)</li>
+                <li>"First Level Appeal" designation</li>
+                <li>Patient information block</li>
+                <li>Salutation to reviewer</li>
+                <li>Opening paragraph referencing denial</li>
+                <li>Justification for appeal</li>
+                <li>Rationale with clinical evidence:
+                    <ul>
+                        <li>Infection source</li>
+                        <li>Organ dysfunction markers</li>
+                        <li>SIRS criteria</li>
+                        <li>Inflammatory markers</li>
+                        <li>Blood culture results</li>
+                        <li>Other conditions</li>
+                    </ul>
+                </li>
+                <li>Hospital course narrative</li>
+                <li>Summary paragraph</li>
+                <li>Conclusion</li>
+                <li>Contact information and signature</li>
+            </ul>
+        </section>
+
+        <!-- Next Steps Panel -->
+        <section id="next" class="panel">
+            <h2>Next Steps</h2>
+
+            <h3>Implementation Order</h3>
+            <ol>
+                <li><strong>Create Delta tables</strong> - Empty tables ready for data ingestion</li>
+                <li><strong>Build Parser Agent</strong> - With scope filter logic</li>
+                <li><strong>Build Writer Agent</strong> - Using existing template structure</li>
+                <li><strong>Build Research Agent</strong> - Returns empty if no Propel docs loaded</li>
+                <li><strong>Build Reference Agent</strong> - Falls back to template if no gold letters</li>
+                <li><strong>Integrate into pipeline</strong> - Connect to existing featurization/inference flow</li>
+            </ol>
+
+            <h3>Open Questions</h3>
+            <ul>
+                <li><strong>Propel document format</strong> - Need to discover when access is provided</li>
+                <li><strong>Gold letter library organization</strong> - Need to discover structure when available</li>
+                <li><strong>Multi-issue denials</strong> - Flagged but not fully supported in POC</li>
+            </ul>
+
+            <h3>Future Enhancements</h3>
+            <ul>
+                <li><strong>Outcome tracking</strong> - Learn from won/lost appeals</li>
+                <li><strong>Multi-issue handling</strong> - Process denials with multiple reasons</li>
+                <li><strong>Payer-specific variations</strong> - Customize by payer patterns</li>
+                <li><strong>Scope expansion</strong> - Remove sepsis filter for all denial types</li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        Rebuttal Engine v2 Design Document | Mercy Hospital | Generated December 19, 2025
+    </footer>
+
+    <script>
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab).classList.add('active');
+            });
+        });
+    </script>
+</body>
+</html>

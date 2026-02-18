@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sepsis Appeal Engine</title>
+<style>
+  @page { size: letter landscape; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #ffffff;
+    color: #1a1a2e;
+    width: 10in;
+    height: 7.7in;
+    margin: 0 auto;
+    padding: 0.4in 0.5in;
+    overflow: hidden;
+  }
+
+  h1 {
+    font-size: 26px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    color: #1a1a2e;
+    letter-spacing: -0.5px;
+  }
+  .subtitle {
+    font-size: 12px;
+    color: #6b7280;
+    margin-bottom: 18px;
+    line-height: 1.4;
+    max-width: 90%;
+  }
+
+  .layout {
+    display: flex;
+    gap: 36px;
+    align-items: flex-start;
+  }
+
+  /* ---- FLOW DIAGRAM (left) ---- */
+  .flow {
+    flex: 0 0 240px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .node {
+    background: #f8f9fa;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 8px 14px;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.35;
+    width: 200px;
+    position: relative;
+  }
+  .node.start, .node.end {
+    background: #1a1a2e;
+    border-color: #1a1a2e;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .node .icon { font-size: 14px; display: block; margin-bottom: 2px; }
+  .node .label { font-weight: 600; color: #2563eb; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .node .desc { color: #6b7280; font-size: 10px; margin-top: 2px; }
+  .arrow {
+    width: 2px;
+    height: 12px;
+    background: #9ca3af;
+    position: relative;
+  }
+  .arrow::after {
+    content: '▼';
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    color: #9ca3af;
+  }
+  .split {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .split .node { width: 95px; padding: 6px 8px; }
+  .split-arrows {
+    display: flex;
+    gap: 80px;
+  }
+
+  /* ---- TEXT (right) ---- */
+  .details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .card {
+    background: #f8f9fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 10px 14px;
+    border-left: 3px solid #2563eb;
+  }
+  .card h3 {
+    font-size: 12px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .card p {
+    font-size: 11px;
+    line-height: 1.45;
+    color: #374151;
+  }
+  .card .highlight {
+    color: #2563eb;
+    font-weight: 600;
+  }
+
+  .cost-bar {
+    background: #1a1a2e;
+    border: 1px solid #1a1a2e;
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    justify-content: space-around;
+    text-align: center;
+  }
+  .cost-bar .stat-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: #ffffff;
+  }
+  .cost-bar .stat-label {
+    font-size: 9px;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Sepsis Appeal Engine</h1>
+<p class="subtitle">Hospitals lose millions when insurers downgrade patient stay coding. This reads the denial, pulls every scrap of clinical evidence, and writes a professional appeal letter — end to end, zero humans in the loop.</p>
+
+<div class="layout">
+
+  <!-- LEFT: Flow Diagram -->
+  <div class="flow">
+    <div class="node start"><span class="icon">📄</span>Denial PDF</div>
+    <div class="arrow"></div>
+    <div class="node">
+      <span class="label">OCR + LLM Parse</span>
+      <span class="desc">Extract what they're disputing</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="split">
+      <div class="node">
+        <span class="label">47 Note Types</span>
+        <span class="desc">Parallel LLM extraction</span>
+      </div>
+      <div class="node">
+        <span class="label">Structured</span>
+        <span class="desc">Labs / Vitals / Meds / DX</span>
+      </div>
+    </div>
+    <div class="split-arrows">
+      <div class="arrow"></div>
+      <div class="arrow"></div>
+    </div>
+    <div class="node">
+      <span class="label">Conflict Detection</span>
+      <span class="desc">Notes vs. data cross-check</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="node">
+      <span class="label">Vector Search</span>
+      <span class="desc">Match to past winning appeals</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="node">
+      <span class="label">Letter Generation</span>
+      <span class="desc">Gold template + all evidence</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="node">
+      <span class="label">Self-Assessment</span>
+      <span class="desc">Scores its own work (1-10)</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="node end"><span class="icon">📝</span>Appeal DOCX</div>
+  </div>
+
+  <!-- RIGHT: Details -->
+  <div class="details">
+    <div class="card">
+      <h3>Parallel Extraction</h3>
+      <p><span class="highlight">47 clinical note types</span> — progress notes, consults, discharge summaries, ED notes, operative reports — all LLM-extracted simultaneously. Wall-clock time &asymp; one call regardless of volume. Each extraction pulls <span class="highlight">SOFA organ dysfunction markers</span> across six systems plus lactate trends and antibiotic timing.</p>
+    </div>
+    <div class="card">
+      <h3>Conflict Detection</h3>
+      <p>Cross-references what physicians wrote against raw lab values and vitals. Doctor says MAP stayed above 65 but the vitals table disagrees? <span class="highlight">Flagged before it ends up in a letter.</span> Conflicts go to an appendix for human review.</p>
+    </div>
+    <div class="card">
+      <h3>Vector-Matched Templates</h3>
+      <p>Each denial gets <span class="highlight">embedded and cosine-matched</span> against a library of past winning appeals. The best match becomes the structural blueprint. No good match (score &lt; 0.7)? Falls back to a default template.</p>
+    </div>
+    <div class="card">
+      <h3>Self-Grading</h3>
+      <p>After writing, a separate LLM pass scores the letter on <span class="highlight">three axes</span>: clinical criteria coverage, argument structure, and evidence quality. Every finding gets a ✓ / △ / ✗ mark. Missing evidence is called out explicitly so reviewers know exactly where the gaps are.</p>
+    </div>
+    <div class="cost-bar">
+      <div><div class="stat-value">$0.50</div><div class="stat-label">Per Appeal</div></div>
+      <div><div class="stat-value">143K</div><div class="stat-label">Input Tokens</div></div>
+      <div><div class="stat-value">18K</div><div class="stat-label">Output Tokens</div></div>
+      <div><div class="stat-value">0</div><div class="stat-label">Humans in Loop</div></div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

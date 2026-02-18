@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DRG Appeal Engine v2</title>
+<style>
+  @page { size: letter landscape; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #ffffff;
+    color: #1a1a2e;
+    width: 10in;
+    height: 7.7in;
+    margin: 0 auto;
+    padding: 0.35in 0.5in;
+    overflow: hidden;
+  }
+
+  h1 {
+    font-size: 25px;
+    font-weight: 700;
+    margin-bottom: 2px;
+    color: #1a1a2e;
+    letter-spacing: -0.5px;
+  }
+  .version-badge {
+    display: inline-block;
+    background: #2563eb;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    margin-left: 8px;
+    vertical-align: middle;
+    letter-spacing: 0.3px;
+  }
+  .subtitle {
+    font-size: 11.5px;
+    color: #6b7280;
+    margin-bottom: 14px;
+    line-height: 1.4;
+    max-width: 95%;
+  }
+
+  .layout {
+    display: flex;
+    gap: 30px;
+    align-items: flex-start;
+  }
+
+  /* ---- FLOW DIAGRAM (left) ---- */
+  .flow {
+    flex: 0 0 230px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .node {
+    background: #f8f9fa;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 7px 12px;
+    text-align: center;
+    font-size: 11px;
+    line-height: 1.35;
+    width: 200px;
+    position: relative;
+  }
+  .node.start, .node.end {
+    background: #1a1a2e;
+    border-color: #1a1a2e;
+    font-weight: 600;
+    color: #ffffff;
+  }
+  .node.new {
+    border-color: #2563eb;
+    border-width: 2px;
+    background: #eff6ff;
+  }
+  .node .icon { font-size: 14px; display: block; margin-bottom: 2px; }
+  .node .label { font-weight: 600; color: #2563eb; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .node .desc { color: #6b7280; font-size: 9.5px; margin-top: 2px; }
+  .node .new-tag { font-size: 8px; color: #2563eb; font-weight: 700; letter-spacing: 0.5px; }
+  .arrow {
+    width: 2px;
+    height: 10px;
+    background: #9ca3af;
+    position: relative;
+  }
+  .arrow::after {
+    content: '\25BC';
+    position: absolute;
+    bottom: -7px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    color: #9ca3af;
+  }
+  .split {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .split .node { width: 95px; padding: 6px 8px; }
+  .split-arrows {
+    display: flex;
+    gap: 80px;
+  }
+
+  /* ---- TEXT (right) ---- */
+  .details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+
+  .conditions-row {
+    display: flex;
+    gap: 10px;
+  }
+  .condition-card {
+    flex: 1;
+    background: #f8f9fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 9px 12px;
+    border-top: 3px solid #2563eb;
+  }
+  .condition-card.new-card {
+    border-top-color: #059669;
+  }
+  .condition-card h3 {
+    font-size: 11px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .condition-card .drg { font-size: 10px; color: #2563eb; font-weight: 600; margin-bottom: 2px; }
+  .condition-card.new-card .drg { color: #059669; }
+  .condition-card ul {
+    font-size: 10px;
+    line-height: 1.4;
+    color: #374151;
+    margin-left: 14px;
+  }
+  .condition-card li { margin-bottom: 1px; }
+
+  .card {
+    background: #f8f9fa;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 9px 12px;
+    border-left: 3px solid #2563eb;
+  }
+  .card.new-feature {
+    border-left-color: #059669;
+  }
+  .card h3 {
+    font-size: 11px;
+    font-weight: 700;
+    color: #1a1a2e;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  .card p {
+    font-size: 10.5px;
+    line-height: 1.4;
+    color: #374151;
+  }
+  .card .highlight {
+    color: #2563eb;
+    font-weight: 600;
+  }
+  .card .new-highlight {
+    color: #059669;
+    font-weight: 600;
+  }
+
+  .cost-bar {
+    background: #1a1a2e;
+    border-radius: 8px;
+    padding: 8px 14px;
+    display: flex;
+    justify-content: space-around;
+    text-align: center;
+  }
+  .cost-bar .stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #ffffff;
+  }
+  .cost-bar .stat-label {
+    font-size: 8.5px;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+
+<h1>DRG Appeal Engine<span class="version-badge">v2 &mdash; Multi-Condition</span></h1>
+<p class="subtitle">Reads insurance denial letters, pulls every scrap of clinical evidence from Epic, and writes professional appeal letters &mdash; end to end, zero humans in the loop. Now supports multiple conditions with pluggable profiles and condition-specific rebuttal strategies.</p>
+
+<div class="layout">
+
+  <!-- LEFT: Flow Diagram -->
+  <div class="flow">
+    <div class="node start"><span class="icon">&#128196;</span>Denial PDF</div>
+    <div class="arrow"></div>
+    <div class="node">
+      <span class="label">OCR + LLM Parse</span>
+      <span class="desc">Extract what they're disputing</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="node new">
+      <span class="new-tag">NEW</span>
+      <span class="label">Condition Routing</span>
+      <span class="desc">Sepsis &bull; Resp Failure &bull; ...</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="split">
+      <div class="node">
+        <span class="label">47 Note Types</span>
+        <span class="desc">Parallel LLM extraction</span>
+      </div>
+      <div class="node">
+        <span class="label">Structured</span>
+        <span class="desc">Labs / Vitals / Meds / DX</span>
+      </div>
+    </div>
+    <div class="split-arrows">
+      <div class="arrow"></div>
+      <div class="arrow"></div>
+    </div>
+    <div class="node">
+      <span class="label">Conflict Detection</span>
+      <span class="desc">Notes vs. data cross-check</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="node">
+      <span class="label">Vector Search</span>
+      <span class="desc">Match to past winning appeals</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="node new">
+      <span class="new-tag">ENHANCED</span>
+      <span class="label">Letter Generation</span>
+      <span class="desc">Source fidelity + rebuttals</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="node new">
+      <span class="new-tag">ENHANCED</span>
+      <span class="label">5-Axis Assessment</span>
+      <span class="desc">Was 3 dimensions, now 5</span>
+    </div>
+    <div class="arrow"></div>
+    <div class="node end"><span class="icon">&#128221;</span>Appeal DOCX</div>
+  </div>
+
+  <!-- RIGHT: Details -->
+  <div class="details">
+
+    <!-- Condition Profiles Row -->
+    <div class="conditions-row">
+      <div class="condition-card">
+        <h3>Sepsis</h3>
+        <div class="drg">DRG 870 / 871 / 872</div>
+        <ul>
+          <li>Programmatic SOFA scoring (6 organs)</li>
+          <li>Lactate trends, vasopressor timing</li>
+          <li>SEP-1 compliance evidence</li>
+        </ul>
+      </div>
+      <div class="condition-card new-card">
+        <h3>Respiratory Failure <span style="font-size:8px; color:#059669;">&bull; NEW</span></h3>
+        <div class="drg">DRG 189 / 190 / 191 / 207 / 208</div>
+        <ul>
+          <li>SpO2, PaO2, P/F ratio, ABG tracking</li>
+          <li>O2 escalation timeline</li>
+          <li>3 physician-authored rebuttals</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card new-feature">
+      <h3>Conditional Rebuttals</h3>
+      <p>Physician-authored rebuttal templates (from <span class="new-highlight">Dr. Gharfeh &amp; Dr. Bourland</span>) are injected <em>only when they match the payor's actual argument</em>. Covers three common denial patterns: consecutive SpO2 requirements, persistent symptoms requirements, and proprietary clinical criteria. The engine reads the denial, decides which rebuttals apply, and weaves them into the letter.</p>
+    </div>
+
+    <div class="card new-feature">
+      <h3>Source Fidelity &amp; Formatting</h3>
+      <p>Letters now <span class="new-highlight">only cite Propel-approved references</span> &mdash; they never list or validate the payor's cited sources, which used to hand the insurer free ammunition. Summary tables at the end of letters are eliminated; all clinical data is embedded in the argument where it belongs.</p>
+    </div>
+
+    <div class="card">
+      <h3>5-Dimension Self-Assessment</h3>
+      <p>After writing, a separate LLM pass grades the letter across <span class="highlight">five axes</span>: source fidelity, Propel criteria coverage, argument structure, evidence quality, and formatting compliance. Every finding gets a &#10003; / &#9651; / &#10007; mark. Expanded from 3 dimensions to catch reference and formatting errors before human review.</p>
+    </div>
+
+    <div class="cost-bar">
+      <div><div class="stat-value">~$0.50</div><div class="stat-label">Per Appeal</div></div>
+      <div><div class="stat-value">2</div><div class="stat-label">Conditions Live</div></div>
+      <div><div class="stat-value">35</div><div class="stat-label">Unit Tests</div></div>
+      <div><div class="stat-value">0</div><div class="stat-label">Humans in Loop</div></div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>
