@@ -6,7 +6,33 @@
 #   profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
 
 import json
+import sys
 from datetime import datetime
+
+# =============================================================================
+# Profile Validation
+# =============================================================================
+REQUIRED_ATTRIBUTES = [
+    "CONDITION_NAME", "CONDITION_DISPLAY_NAME",
+    "GOLD_LETTERS_PATH", "PROPEL_DATA_PATH", "DEFAULT_TEMPLATE_PATH",
+    "CLINICAL_SCORES_TABLE_NAME",
+    "DENIAL_CONDITION_QUESTION", "DENIAL_CONDITION_FIELD",
+    "NOTE_EXTRACTION_TARGETS", "STRUCTURED_DATA_CONTEXT", "CONFLICT_EXAMPLES",
+    "WRITER_SCORING_INSTRUCTIONS",
+    "ASSESSMENT_CONDITION_LABEL", "ASSESSMENT_CRITERIA_LABEL",
+]
+
+
+def validate_profile(profile):
+    """Check that a condition profile module has all required attributes."""
+    missing = [attr for attr in REQUIRED_ATTRIBUTES if not hasattr(profile, attr)]
+    if missing:
+        name = getattr(profile, '__name__', str(profile))
+        raise AttributeError(
+            f"Condition profile '{name}' is missing required attributes:\n"
+            + "\n".join(f"  - {attr}" for attr in missing)
+            + "\n\nSee an existing profile (e.g., sepsis.py) for the full interface."
+        )
 
 # =============================================================================
 # Identity & Paths

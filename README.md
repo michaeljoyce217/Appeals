@@ -136,8 +136,8 @@ profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
 
 ### Adding a New Condition
 
-1. Copy `condition_profiles/TEMPLATE.py` to `condition_profiles/<your_condition>.py`
-2. Fill in all required constants (see TEMPLATE.py for documentation)
+1. Copy an existing profile (e.g., `condition_profiles/respiratory_failure.py`) to `condition_profiles/<your_condition>.py`
+2. Fill in all required constants (see `REQUIRED_ATTRIBUTES` list in the profile)
 3. Add gold standard letters to a workspace subdirectory
 4. Add Propel definition PDF to the propel_data directory
 5. Optionally implement a clinical scorer (like SOFA for sepsis)
@@ -165,14 +165,11 @@ Each finding is marked present, could strengthen, or missing. The overall score 
 ```
 SEPSIS/
 ├── condition_profiles/
-│   ├── __init__.py                   # Profile validation (REQUIRED_ATTRIBUTES)
-│   ├── sepsis.py                     # Sepsis profile (config + SOFA scorer + DOCX rendering)
-│   ├── respiratory_failure.py        # ARF profile (config + conditional rebuttals)
-│   └── TEMPLATE.py                   # Template for creating new condition profiles
+│   ├── sepsis.py                     # Sepsis profile (config + validation + SOFA scorer + DOCX rendering)
+│   └── respiratory_failure.py        # ARF profile (config + validation + conditional rebuttals)
 ├── data/
 │   ├── featurization_train.py        # ONE-TIME: Knowledge base ingestion (gold letters + Propel)
-│   ├── featurization_inference.py    # PER-CASE: Data prep (denial + notes + structured data)
-│   └── structured_data_ingestion.py  # PER-CASE: Labs, vitals, meds, diagnoses from Clarity
+│   └── featurization_inference.py    # PER-CASE: Data prep (denial + notes + structured data)
 ├── model/
 │   └── inference.py                  # GENERATION: Vector search, write, assess, export
 ├── tests/

@@ -22,14 +22,11 @@
 ```
 SEPSIS/
 ├── condition_profiles/
-│   ├── __init__.py                   # Package init
-│   ├── sepsis.py                     # Sepsis condition profile (config + SOFA scorer + DOCX rendering)
-│   ├── respiratory_failure.py        # ARF condition profile (config + conditional rebuttals)
-│   └── TEMPLATE.py                   # Template for creating new condition profiles
+│   ├── sepsis.py                     # Sepsis profile (config + validation + SOFA scorer + DOCX rendering)
+│   └── respiratory_failure.py        # ARF profile (config + validation + conditional rebuttals)
 ├── data/
 │   ├── featurization_train.py        # ONE-TIME: Knowledge base ingestion (gold letters + propel)
-│   ├── featurization_inference.py    # PER-CASE: Data prep (denial + notes + structured data)
-│   └── structured_data_ingestion.py  # PER-CASE: Labs, vitals, meds, diagnoses from Clarity
+│   └── featurization_inference.py    # PER-CASE: Data prep (denial + notes + structured data)
 ├── model/
 │   └── inference.py                  # GENERATION: Vector search, write, assess, export
 ├── utils/
@@ -126,8 +123,8 @@ The base engine loads the Propel `definition_summary` for the current condition 
 
 ### Adding a New Condition
 
-1. Copy `condition_profiles/TEMPLATE.py` to `condition_profiles/<your_condition>.py`
-2. Fill in all required constants (see TEMPLATE.py docstrings)
+1. Copy an existing profile (e.g., `condition_profiles/respiratory_failure.py`) to `condition_profiles/<your_condition>.py`
+2. Fill in all required constants (see `REQUIRED_ATTRIBUTES` list in the profile)
 3. Add gold standard letters to a `utils/` subdirectory
 4. Add Propel definition PDF to `utils/propel_data/`
 5. Optionally implement a clinical scorer (like SOFA for sepsis)
@@ -208,12 +205,14 @@ Labs, vitals, and medications are queried from Clarity and summarized by LLM for
 - **Vitals:** Temperature, MAP, heart rate, respiratory rate, SpO2, GCS
 - **Meds:** Antibiotic timing (SEP-1 compliance), vasopressor initiation, fluid resuscitation
 
-### Diagnosis Records (DX_NAME)
-We query DX records directly from Epic's CLARITY_EDG table - these are more granular than ICD-10 codes:
-- **DX_NAME** is the specific clinical description (e.g., "Severe sepsis with septic shock due to MRSA")
+### Diagnosis Records (DX_NAME + ICD10_CODE)
+We query DX records from three Epic sources (outpatient encounter DX, inpatient account DX, problem list history) and include both the ICD-10 code and the granular clinical description:
+- **ICD10_CODE** is the standard billing code (e.g., "J96.01")
+- **DX_NAME** is the specific clinical description (e.g., "Acute respiratory failure with hypoxia")
 - **DX_ID** provides traceability to the source record
 - All diagnoses include timestamps - LLM decides relevance based on date
-- ICD-10 codes are NOT used - DX_NAME is what we quote in appeals
+- In the merged timeline, diagnoses appear as "ICD10_CODE - DX_NAME" (e.g., "J96.01 - Acute respiratory failure with hypoxia")
+- Both codes are forwarded to the writing agent for citation in appeals
 
 ### LLM Note Extraction (Parallel)
 All clinical notes are extracted via LLM in parallel (ThreadPoolExecutor) to pull relevant clinical data WITH timestamps in a consistent structured format (e.g., "03/15/2024 08:00: Lactate 4.2, MAP 63"). This ensures homogeneous output regardless of note length and keeps latency flat despite the large number of note types.

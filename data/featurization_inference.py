@@ -35,8 +35,7 @@ spark = SparkSession.builder.getOrCreate()
 # Condition profile — set to the condition being processed
 CONDITION_PROFILE = "sepsis"  # "sepsis", "respiratory_failure", etc.
 profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
-from condition_profiles import validate_profile
-validate_profile(profile)
+profile.validate_profile(profile)
 
 # -----------------------------------------------------------------------------
 # INPUT: Set the denial PDF to process
@@ -675,7 +674,8 @@ def query_meds(account_id):
 
 def query_diagnoses(account_id):
     """
-    Query diagnosis records for account (DX_NAME is the granular clinical description).
+    Query diagnosis records for account.
+    Includes both DX_NAME (granular clinical description) and ICD10_CODE.
     All diagnoses include their timestamp - LLM decides relevance based on date.
     """
     spark.sql(f"""
@@ -684,6 +684,7 @@ def query_diagnoses(account_id):
     SELECT te.HSP_ACCOUNT_ID, te.PAT_ENC_CSN_ID,
            dd.DX_ID,
            edg.DX_NAME,
+           dd.ICD10_CODE,
            CAST(pe.CONTACT_DATE AS TIMESTAMP) AS EVENT_TIMESTAMP,
            'OUTPATIENT_ENC_DX' AS source
     FROM target_encounter te
@@ -696,6 +697,7 @@ def query_diagnoses(account_id):
     SELECT te.HSP_ACCOUNT_ID, te.PAT_ENC_CSN_ID,
            dx.DX_ID,
            edg.DX_NAME,
+           dx.CODE AS ICD10_CODE,
            CAST(ha.DISCH_DATE_TIME AS TIMESTAMP) AS EVENT_TIMESTAMP,
            'INPATIENT_ACCT_DX' AS source
     FROM target_encounter te
@@ -708,6 +710,7 @@ def query_diagnoses(account_id):
     SELECT te.HSP_ACCOUNT_ID, te.PAT_ENC_CSN_ID,
            phx.HX_PROBLEM_ID AS DX_ID,
            phx.HX_PROBLEM_DX_NAME AS DX_NAME,
+           phx.HX_PROBLEM_ICD10_CODE AS ICD10_CODE,
            CAST(phx.HX_DATE_OF_ENTRY AS TIMESTAMP) AS EVENT_TIMESTAMP,
            'PROBLEM_LIST' AS source
     FROM target_encounter te
@@ -717,10 +720,10 @@ def query_diagnoses(account_id):
 
     spark.sql(f"""
     CREATE OR REPLACE TABLE {DIAGNOSIS_TABLE} AS
-    SELECT DISTINCT HSP_ACCOUNT_ID, PAT_ENC_CSN_ID, DX_ID, DX_NAME,
+    SELECT DISTINCT HSP_ACCOUNT_ID, PAT_ENC_CSN_ID, DX_ID, DX_NAME, ICD10_CODE,
            EVENT_TIMESTAMP, source
     FROM encounter_diagnoses
-    WHERE DX_NAME IS NOT NULL
+    WHERE DX_NAME IS NOT NULL OR ICD10_CODE IS NOT NULL
     ORDER BY EVENT_TIMESTAMP ASC
     """)
     count = spark.sql(f"SELECT COUNT(*) as cnt FROM {DIAGNOSIS_TABLE}").collect()[0]["cnt"]
@@ -750,7 +753,11 @@ def create_merged_timeline(account_id):
         FROM {MEDS_TABLE}
         UNION ALL
         SELECT HSP_ACCOUNT_ID, PAT_ENC_CSN_ID, EVENT_TIMESTAMP, 'DIAGNOSIS' AS event_type,
-               COALESCE(DX_NAME, 'Unknown diagnosis') AS event_detail,
+               CONCAT(
+                   COALESCE(ICD10_CODE, ''),
+                   CASE WHEN ICD10_CODE IS NOT NULL AND DX_NAME IS NOT NULL THEN ' - ' ELSE '' END,
+                   COALESCE(DX_NAME, 'Unknown diagnosis')
+               ) AS event_detail,
                0 AS is_abnormal
         FROM {DIAGNOSIS_TABLE}
         WHERE EVENT_TIMESTAMP IS NOT NULL
@@ -971,7 +978,7 @@ _diagnosis_examples = getattr(profile, 'DIAGNOSIS_EXAMPLES', '')
 STRUCTURED_DATA_EXTRACTION_PROMPT = '''You are a clinical data analyst extracting condition-relevant information from structured EHR data.
 
 **Context on Diagnosis Records:**
-The diagnosis names are the granular clinical descriptions from Epic's diagnosis dictionary. Quote these directly in appeals - they are the specific documented diagnoses. {diagnosis_examples}
+Diagnosis entries include both the ICD-10 code and the granular clinical description (DX_NAME) from Epic's diagnosis dictionary, formatted as "ICD10_CODE - DX_NAME" (e.g., "J96.01 - Acute respiratory failure with hypoxia"). Quote both the ICD-10 code and DX_NAME in appeals when available - they are the specific documented diagnoses. {diagnosis_examples}
 Multiple diagnosis records may describe the same condition at different levels of specificity. Use the most specific documented diagnosis that is supported by clinical evidence.
 
 Diagnoses include timestamps - use these to understand if a condition is pre-existing (before admission) or documented during the encounter.

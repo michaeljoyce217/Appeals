@@ -14,7 +14,7 @@ import sys
 import types
 import pytest
 
-from condition_profiles import REQUIRED_ATTRIBUTES, validate_profile
+from condition_profiles.sepsis import REQUIRED_ATTRIBUTES, validate_profile
 
 
 # =============================================================================
@@ -64,10 +64,10 @@ class TestValidateProfile:
             setattr(mod, attr, None)
         validate_profile(mod)  # Should not raise
 
-    def test_error_mentions_template(self):
-        """Error message should reference TEMPLATE.py for guidance."""
+    def test_error_mentions_existing_profile(self):
+        """Error message should reference an existing profile for guidance."""
         mod = types.ModuleType("fake_profile")
-        with pytest.raises(AttributeError, match="TEMPLATE.py"):
+        with pytest.raises(AttributeError, match="sepsis.py"):
             validate_profile(mod)
 
 
