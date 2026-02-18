@@ -10,6 +10,7 @@
             --mercy-light: #4a90c2;
             --accent: #e85a30;
             --success: #28a745;
+            --new-green: #059669;
             --light-bg: #f8f9fa;
             --dark-text: #2c3e50;
         }
@@ -99,10 +100,19 @@
             border-color: var(--success);
         }
 
+        .callout.new-feature {
+            background: #ecfdf5;
+            border-color: var(--new-green);
+        }
+
         .callout h4 {
             color: var(--mercy-blue);
             margin-bottom: 0.5rem;
             font-size: 1.1rem;
+        }
+
+        .callout.new-feature h4 {
+            color: var(--new-green);
         }
 
         .comparison-table {
@@ -126,6 +136,36 @@
 
         .comparison-table tr:nth-child(even) {
             background: var(--light-bg);
+        }
+
+        .comparison-table .new-row td {
+            border-left: 3px solid var(--new-green);
+        }
+
+        .new-badge {
+            display: inline-block;
+            background: var(--new-green);
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 8px;
+            margin-left: 4px;
+            vertical-align: middle;
+            letter-spacing: 0.3px;
+        }
+
+        .enhanced-badge {
+            display: inline-block;
+            background: var(--mercy-light);
+            color: white;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 8px;
+            margin-left: 4px;
+            vertical-align: middle;
+            letter-spacing: 0.3px;
         }
 
         footer {
@@ -163,6 +203,10 @@
             border-top: 4px solid var(--accent);
         }
 
+        .benefit-card.new {
+            border-top-color: var(--new-green);
+        }
+
         .benefit-card .icon {
             font-size: 2.5rem;
             margin-bottom: 1rem;
@@ -179,12 +223,64 @@
             margin: 0;
         }
 
+        .condition-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin: 1.5rem 0;
+        }
+
+        .condition-card {
+            background: var(--light-bg);
+            border-radius: 10px;
+            padding: 1.5rem;
+            border-top: 4px solid var(--mercy-blue);
+        }
+
+        .condition-card.new {
+            border-top-color: var(--new-green);
+        }
+
+        .condition-card h4 {
+            color: var(--mercy-blue);
+            margin-bottom: 0.3rem;
+            font-size: 1.1rem;
+        }
+
+        .condition-card.new h4 {
+            color: var(--new-green);
+        }
+
+        .condition-card .drg {
+            font-size: 0.9rem;
+            color: var(--mercy-light);
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .condition-card.new .drg {
+            color: var(--new-green);
+        }
+
+        .condition-card ul {
+            font-size: 0.95rem;
+            color: #555;
+            padding-left: 1.2rem;
+        }
+
+        .condition-card li {
+            margin-bottom: 0.3rem;
+        }
+
         @media (max-width: 768px) {
             header h1 {
                 font-size: 1.8rem;
             }
             .pipeline-visual {
                 font-size: 0.65rem;
+            }
+            .condition-cards {
+                grid-template-columns: 1fr;
             }
         }
 
@@ -200,141 +296,193 @@
 </head>
 <body>
     <header>
-        <h1>Sepsis Appeal Engine</h1>
+        <h1>DRG Appeal Engine</h1>
         <p>Technical Architecture</p>
-        <span class="subtitle">Multi-Agent AI System | Financial Data Science</span>
+        <span class="subtitle">Multi-Condition AI System | Financial Data Science</span>
     </header>
 
     <main class="content">
         <section class="panel">
             <h2>Technical Architecture</h2>
             <p>
-                The Sepsis Appeal Engine is Mercy's first <strong>multi-agent AI system</strong> - an orchestrated
+                The DRG Appeal Engine is Mercy's first <strong>multi-agent AI system</strong> &mdash; an orchestrated
                 pipeline of specialized AI agents that collaborate to transform a denial PDF into a complete appeal letter.
-                Each denial is processed end-to-end in a single run - no batch processing, no intermediate tables.
+                Each denial is processed end-to-end in a single run. The engine is <strong>condition-agnostic</strong>:
+                all condition-specific logic lives in pluggable profiles, currently supporting sepsis and acute respiratory failure.
             </p>
+
+            <h3>Supported Conditions</h3>
+            <div class="condition-cards">
+                <div class="condition-card">
+                    <h4>Sepsis</h4>
+                    <div class="drg">DRG 870 / 871 / 872</div>
+                    <ul>
+                        <li>Programmatic SOFA scoring (6 organ systems)</li>
+                        <li>Lactate trends, vasopressor timing</li>
+                        <li>SEP-1 bundle compliance evidence</li>
+                        <li>SOFA table appended to DOCX when score &ge; 2</li>
+                    </ul>
+                </div>
+                <div class="condition-card new">
+                    <h4>Acute Respiratory Failure <span class="new-badge">NEW</span></h4>
+                    <div class="drg">DRG 189 / 190 / 191 / 207 / 208</div>
+                    <ul>
+                        <li>SpO2, PaO2, P/F ratio, ABG tracking</li>
+                        <li>O2 escalation timeline (room air &rarr; ventilator)</li>
+                        <li>3 physician-authored conditional rebuttals</li>
+                        <li>No clinical scoring system (data-driven arguments only)</li>
+                    </ul>
+                </div>
+            </div>
 
             <h3>Single-Letter Processing Flow</h3>
             <div class="pipeline-visual">
-┌─────────────────────────────────────────────────────────────────────────────────────────┐
-│                         SINGLE-LETTER PROCESSING (inference.py)                          │
-│                                                                                          │
-│   [Denial PDF]                                                                           │
-│        │                                                                                 │
-│        ▼                                                                                 │
-│   ┌─────────────────────┐                                                                │
-│   │  DOCUMENT INTEL     │  Azure AI Document Intelligence                                │
-│   │  AGENT              │  • OCR extraction from PDF                                     │
-│   │                     │  • Page-by-page text output                                    │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             │ Full denial text                                                           │
-│             ▼                                                                            │
-│   ┌─────────────────────┐                                                                │
-│   │  EXTRACTION AGENT   │  GPT-4.1 LLM                                                   │
-│   │                     │  • Extract: hsp_account_id from denial text                    │
-│   │  "Metadata          │                                                                │
-│   │   Extraction"       │  (POC only - workqueue provides this directly in production)  │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             │ account_id                                                                 │
-│             ▼                                                                            │
-│   ┌─────────────────────┐                                                                │
-│   │  PARSER AGENT       │  GPT-4.1 LLM                                                   │
-│   │                     │  • Extract: payor name                                         │
-│   │  "Structured Data   │  • Extract: original_drg, proposed_drg (only if explicit)     │
-│   │   Extraction"       │  • Classify: condition match (true/false)                            │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             │ payor, DRGs, condition match                                                     │
-│             ▼                                                                            │
-│   ┌─────────────────────┐    ┌─────────────────────────────────────────────────┐         │
-│   │  EMBEDDING +        │◄───│  Gold Letter Library (Unity Catalog)             │         │
-│   │  RETRIEVAL AGENT    │    │                                                  │         │
-│   │                     │    │  Each gold letter contains:                      │         │
-│   │  text-embedding-    │    │  • Original DENIAL text (with embedding)         │         │
-│   │  ada-002            │    │  • Winning APPEAL text (used as template)        │         │
-│   │                     │    │                                                  │         │
-│   │  Process:           │    │  Logic: Find the past denial most similar to    │         │
-│   │  1. Embed new denial│    │  this new denial, then use its winning appeal   │         │
-│   │     text (1536 dims)│    │  as a template - proven arguments get reused    │         │
-│   │  2. Compare vs all  │    │                                                  │         │
-│   │     gold denial     │    │  Threshold: 0.7 cosine similarity               │         │
-│   │     embeddings      │    │  • Score >= 0.7: Use matched appeal template    │         │
-│   │  3. Return best     │    │  • Score < 0.7: Use default template instead    │         │
-│   │     match           │    │                                                  │         │
-│   └─────────┬───────────┘    └─────────────────────────────────────────────────┘         │
-│             │                                                                            │
-│             │ Best Match: gold letter appeal text (or default template)                  │
-│             ▼                                                                            │
-│   ┌─────────────────────┐    ┌───────────────────────────────────────────────────┐       │
-│   │  CLARITY QUERY      │◄───│            EPIC CLARITY DATABASE                   │       │
-│   │                     │    │                                                    │       │
-│   │  "Clinical Context" │    │   47 CLINICAL NOTE TYPES RETRIEVED:                │       │
-│   │                     │    │   Progress Notes  │  Consults       │ H&P          │       │
-│   │  Queries for this   │    │   Discharge Summ  │  ED Notes       │ Initial Assess│      │
-│   │  single account     │    │   ED Triage       │  ED Provider    │ Addendum      │      │
-│   │                     │    │   Hospital Course │  Subj/Objective │ Assess & Plan │      │
-│   │                     │    │   Nursing Notes   │  Code Docs      │              │       │
-│   │                     │    │                                                    │       │
-│   │                     │    │   Notes < 8,000 chars: pass through unchanged      │       │
-│   │                     │    │   Notes > 8,000 chars: LLM extracts key clinical   │       │
-│   │                     │    │     data (SOFA components, vitals, labs, infection │       │
-│   │                     │    │     evidence, timestamps) to support appeal        │       │
-│   └─────────┬───────────┘    └───────────────────────────────────────────────────┘       │
-│             │                                                                            │
-│             │ Clinical notes (short pass through, long ones LLM-extracted)               │
-│             ▼                                                                            │
-│   ┌─────────────────────┐    ┌─────────────────────┐                                     │
-│   │  STRUCTURED DATA    │◄───│  Clarity Structured │  (Separate script:                  │
-│   │  EXTRACTION**       │    │  Tables             │   structured_data_ingestion.py)     │
-│   │                     │    │  (fudgesicle_       │                                     │
-│   │  GPT-4.1 LLM        │    │   labs/vitals/meds/ │  Integrated into            │
-│   │                     │    │   procedures/icd10) │  featurization_inference.py          │
-│   │  Extracts sepsis-   │    └─────────────────────┘                                     │
-│   │  relevant data from │                                                                │
-│   │  chronological      │                                                                │
-│   │  timeline           │                                                                │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             │ Extracted structured data (Clinical scores, bundle compliance, trends)     │
-│             ▼                                                                            │
-│   ┌─────────────────────┐    ┌─────────────────────┐                                     │
-│   │  WRITER AGENT       │◄───│  Propel Criteria    │                                     │
-│   │                     │    │  (from Unity        │                                     │
-│   │  GPT-4.1 LLM        │    │   Catalog)          │                                     │
-│   │  "Appeal Generation"│    └─────────────────────┘                                     │
-│   │                     │                                                                │
-│   │  CONTEXT INCLUDES:  │                                                                │
-│   │  • Denial letter    │                                                                │
-│   │  • Gold appeal      │                                                                │
-│   │  • Propel criteria  │                                                                │
-│   │  • 47 clinical notes│                                                                │
-│   │  • Structured data**│                                                                │
-│   │  • Patient info     │                                                                │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             │ Generated appeal letter                                                    │
-│             ▼                                                                            │
-│   ┌─────────────────────┐                                                                │
-│   │  ASSESSMENT AGENT   │  GPT-4.1 LLM                                                   │
-│   │                     │  • Evaluates letter against Propel criteria                    │
-│   │  "Strength          │  • Scores argument structure vs denial/gold                    │
-│   │   Assessment"       │  • Flags missing evidence from notes/structured data           │
-│   │                     │  • Returns: score (1-10), rating, detailed breakdown           │
-│   └─────────┬───────────┘                                                                │
-│             │                                                                            │
-│             ▼                                                                            │
-│   ┌─────────────────────┐                                                                │
-│   │  DOCX EXPORT        │  Formatted Word document                                       │
-│   │                     │  • Assessment section before letter body                       │
-│   │  "Human Review      │  • Saved to utils/outputs/                                     │
-│   │   Ready"            │  • Filename: {account_id}_{patient}_appeal.docx                │
-│   └─────────────────────┘                                                                │
-│                                                                                          │
-│   *In production, account_id comes from Epic workqueue instead of LLM extraction         │
-│                                                                                          │
-└─────────────────────────────────────────────────────────────────────────────────────────┘</div>
+&#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;
+&#9474;                         SINGLE-LETTER PROCESSING PIPELINE                           &#9474;
+&#9474;                                                                                      &#9474;
+&#9474;   [Denial PDF]                                                                       &#9474;
+&#9474;        &#9474;                                                                             &#9474;
+&#9474;        &#9660;                                                                             &#9474;
+&#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                                                            &#9474;
+&#9474;   &#9474;  DOCUMENT INTEL     &#9474;  Azure AI Document Intelligence                            &#9474;
+&#9474;   &#9474;  AGENT              &#9474;  &#8226; OCR extraction from PDF                                 &#9474;
+&#9474;   &#9474;                     &#9474;  &#8226; Page-by-page text output                                &#9474;
+&#9474;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                                                            &#9474;
+&#9474;             &#9474;                                                                        &#9474;
+&#9474;             &#9660;                                                                        &#9474;
+&#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                                                            &#9474;
+&#9474;   &#9474;  PARSER AGENT       &#9474;  GPT-4.1 LLM                                               &#9474;
+&#9474;   &#9474;                     &#9474;  &#8226; Extract: payor, DRGs, account ID*                       &#9474;
+&#9474;   &#9474;  "Denial Analysis"  &#9474;  &#8226; Classify: condition match (sepsis / ARF / ...)          &#9474;
+&#9474;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                                                            &#9474;
+&#9474;             &#9474;                                                                        &#9474;
+&#9474;             &#9474; payor, DRGs, condition &#9472;&#9472;&#9488;                                              &#9474;
+&#9474;             &#9660;                         &#9474;                                              &#9474;
+&#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;         &#9474;                                              &#9474;
+&#9474;   &#9474;  CONDITION PROFILE  &#9474;  &#9668;&#9472;&#9472;&#9496;  [NEW] Load condition-specific config              &#9474;
+&#9474;   &#9474;  ROUTER             &#9474;  &#8226; Selects: sepsis.py OR respiratory_failure.py            &#9474;
+&#9474;   &#9474;                     &#9474;  &#8226; Loads: extraction targets, scoring, rebuttals           &#9474;
+&#9474;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                                                            &#9474;
+&#9474;             &#9474;                                                                        &#9474;
+&#9474;             &#9660;                                                                        &#9474;
+&#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488; &#9474;
+&#9474;   &#9474;  EMBEDDING +        &#9474;&#9668;&#9472;&#9472;&#9472;&#9474;  Gold Letter Library (Unity Catalog)             &#9474; &#9474;
+&#9474;   &#9474;  RETRIEVAL AGENT    &#9474;    &#9474;                                                  &#9474; &#9474;
+&#9474;   &#9474;                     &#9474;    &#9474;  Each gold letter contains:                      &#9474; &#9474;
+&#9474;   &#9474;  text-embedding-    &#9474;    &#9474;  &#8226; Original DENIAL text (with embedding)         &#9474; &#9474;
+&#9474;   &#9474;  ada-002            &#9474;    &#9474;  &#8226; Winning APPEAL text (used as template)        &#9474; &#9474;
+&#9474;   &#9474;                     &#9474;    &#9474;                                                  &#9474; &#9474;
+&#9474;   &#9474;  Process:           &#9474;    &#9474;  Logic: Find the past denial most similar to    &#9474; &#9474;
+&#9474;   &#9474;  1. Embed new denial&#9474;    &#9474;  this new denial, then use its winning appeal   &#9474; &#9474;
+&#9474;   &#9474;     text (1536 dims)&#9474;    &#9474;  as a template &#8212; proven arguments get reused    &#9474; &#9474;
+&#9474;   &#9474;  2. Compare vs all  &#9474;    &#9474;                                                  &#9474; &#9474;
+&#9474;   &#9474;     gold denial     &#9474;    &#9474;  Threshold: 0.7 cosine similarity               &#9474; &#9474;
+&#9474;   &#9474;     embeddings      &#9474;    &#9474;  &#8226; Score &gt;= 0.7: Use matched appeal template    &#9474; &#9474;
+&#9474;   &#9474;  3. Return best     &#9474;    &#9474;  &#8226; Score &lt; 0.7: Use default template instead    &#9474; &#9474;
+&#9474;   &#9474;     match           &#9474;    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496; &#9474;
+&#9474;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                                                            &#9474;
+&#9474;             &#9474;                                                                        &#9474;
+&#9474;             &#9660;                                                                        &#9474;
+&#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;   &#9474;
+&#9474;   &#9474;  CLARITY QUERY      &#9474;&#9668;&#9472;&#9472;&#9472;&#9474;            EPIC CLARITY DATABASE                   &#9474;   &#9474;
+&#9474;   &#9474;                     &#9474;    &#9474;                                                    &#9474;   &#9474;
+&#9474;   &#9474;  "Clinical Context" &#9474;    &#9474;   47 CLINICAL NOTE TYPES RETRIEVED                 &#9474;   &#9474;
+&#9474;   &#9474;                     &#9474;    &#9474;   + Labs, Vitals, Meds, Diagnoses, Procedures     &#9474;   &#9474;
+&#9474;   &#9474;  Queries for this   &#9474;    &#9474;   + ICD-10 codes, DX records                      &#9474;   &#9474;
+&#9474;   &#9474;  single account     &#9474;    &#9474;                                                    &#9474;   &#9474;
+&#9474;   &#9474;                     &#9474;    &#9474;   All notes extracted in parallel via LLM          &#9474;   &#9474;
+&#9474;   &#9474;                     &#9474;    &#9474;   Extraction targets driven by Propel definition   &#9474;   &#9474;
+&#9474;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;   &#9474;
+&#9474;             &#9474;                                                                        &#9474;
+&#9474;             &#9660;                                                                        &#9474;
+&#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                             &#9474;
+&#9474;   &#9474;  STRUCTURED DATA    &#9474;&#9668;&#9472;&#9472;&#9472;&#9474;  Clarity Structured &#9474;                             &#9474;
+&#9474;   &#9474;  EXTRACTION         &#9474;    &#9474;  Tables             &#9474;                             &#9474;
+&#9474;   &#9474;                     &#9474;    &#9474;  (fudgesicle_       &#9474;                             &#9474;
+&#9474;   &#9474;  GPT-4.1 LLM        &#9474;    &#9474;   labs/vitals/meds/ &#9474;                             &#9474;
+&#9474;   &#9474;                     &#9474;    &#9474;   dx/procedures/    &#9474;                             &#9474;
+&#9474;   &#9474;  Extracts condition-&#9474;    &#9474;   icd10)            &#9474;                             &#9474;
+&#9474;   &#9474;  relevant data from &#9474;    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                             &#9474;
+&#9474;   &#9474;  chronological      &#9474;                                                            &#9474;
+&#9474;   &#9474;  timeline           &#9474;                                                            &#9474;
+&#9474;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                                                            &#9474;
+&#9474;             &#9474;                                                                        &#9474;
+&#9474;             &#9660;                                                                        &#9474;
+&#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;    &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                             &#9474;
+&#9474;   &#9474;  WRITER AGENT       &#9474;&#9668;&#9472;&#9472;&#9472;&#9474;  Propel Criteria    &#9474;                             &#9474;
+&#9474;   &#9474;                     &#9474;    &#9474;  (from Unity        &#9474;                             &#9474;
+&#9474;   &#9474;  GPT-4.1 LLM        &#9474;    &#9474;   Catalog)          &#9474;                             &#9474;
+&#9474;   &#9474;  "Appeal Generation"&#9474;    &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                             &#9474;
+&#9474;   &#9474;                     &#9474;                                                            &#9474;
+&#9474;   &#9474;  CONTEXT INCLUDES:  &#9474;    [ENHANCED] Source fidelity rules                        &#9474;
+&#9474;   &#9474;  &#8226; Denial letter    &#9474;    [ENHANCED] No-summary-table formatting                  &#9474;
+&#9474;   &#9474;  &#8226; Gold appeal      &#9474;    [NEW] Conditional rebuttals (if profile provides)       &#9474;
+&#9474;   &#9474;  &#8226; Propel criteria  &#9474;                                                            &#9474;
+&#9474;   &#9474;  &#8226; 47 clinical notes&#9474;                                                            &#9474;
+&#9474;   &#9474;  &#8226; Structured data  &#9474;                                                            &#9474;
+&#9474;   &#9474;  &#8226; Clinical scores  &#9474;                                                            &#9474;
+&#9474;   &#9474;  &#8226; Patient info     &#9474;                                                            &#9474;
+&#9474;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                                                            &#9474;
+&#9474;             &#9474;                                                                        &#9474;
+&#9474;             &#9660;                                                                        &#9474;
+&#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                                                            &#9474;
+&#9474;   &#9474;  ASSESSMENT AGENT   &#9474;  GPT-4.1 LLM                                               &#9474;
+&#9474;   &#9474;                     &#9474;  [ENHANCED] Now scores 5 dimensions:                       &#9474;
+&#9474;   &#9474;  "5-Axis Strength   &#9474;  1. Source Fidelity &#8212; Propel-only references?              &#9474;
+&#9474;   &#9474;   Assessment"       &#9474;  2. Propel Criteria &#8212; coverage of clinical definition      &#9474;
+&#9474;   &#9474;                     &#9474;  3. Argument Structure &#8212; rebuttals applied correctly?      &#9474;
+&#9474;   &#9474;                     &#9474;  4. Evidence Quality &#8212; timestamps, specific values         &#9474;
+&#9474;   &#9474;                     &#9474;  5. Formatting Compliance &#8212; no summary table              &#9474;
+&#9474;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9516;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                                                            &#9474;
+&#9474;             &#9474;                                                                        &#9474;
+&#9474;             &#9660;                                                                        &#9474;
+&#9474;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9488;                                                            &#9474;
+&#9474;   &#9474;  DOCX EXPORT        &#9474;  Formatted Word document                                   &#9474;
+&#9474;   &#9474;                     &#9474;  &#8226; 5-dimension assessment before letter body               &#9474;
+&#9474;   &#9474;  "Human Review      &#9474;  &#8226; Clinical scores appendix (if applicable)                &#9474;
+&#9474;   &#9474;   Ready"            &#9474;  &#8226; Conflicts appendix (if any)                            &#9474;
+&#9474;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;                                                            &#9474;
+&#9474;                                                                                      &#9474;
+&#9474;   *In production, account_id comes from Epic workqueue instead of LLM extraction     &#9474;
+&#9474;                                                                                      &#9474;
+&#9492;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9472;&#9496;</div>
+
+            <h3>v2 Enhancements</h3>
+
+            <div class="callout new-feature">
+                <h4>Conditional Rebuttals (NEW)</h4>
+                <p>
+                    Condition profiles can now include <strong>physician-authored rebuttal templates</strong> for common
+                    payor denial arguments. The engine reads the denial, determines which rebuttals match the payor's
+                    actual argument, and injects only the relevant ones into both the writer prompt and the assessment.
+                    Rebuttals that don't match the denial are not applied.
+                </p>
+                <p>
+                    The respiratory failure profile includes three rebuttals from <strong>Dr. Gharfeh and Dr. Bourland</strong>:
+                    consecutive SpO2 reading requirements, persistent symptoms requirements, and proprietary clinical criteria.
+                    Future conditions can add their own.
+                </p>
+            </div>
+
+            <div class="callout new-feature">
+                <h4>Source Fidelity (NEW)</h4>
+                <p>
+                    The writer prompt now enforces <strong>source fidelity rules</strong>: the letter only cites
+                    Propel-approved references and never lists or validates the payor's cited sources. This prevents
+                    handing the insurer free ammunition by engaging with their references on their terms.
+                    The assessment evaluates compliance as a scored dimension.
+                </p>
+            </div>
+
+            <div class="callout new-feature">
+                <h4>5-Dimension Assessment (ENHANCED)</h4>
+                <p>
+                    The self-assessment expanded from 3 dimensions to 5. New dimensions:
+                    <strong>Source Fidelity</strong> (did the letter cite only Propel-approved references?) and
+                    <strong>Formatting Compliance</strong> (no summary table at end of letter).
+                    Each finding is marked &#10003; / &#9651; / &#10007; for quick CDI review.
+                </p>
+            </div>
 
             <h3>Agent Summary</h3>
             <table class="comparison-table">
@@ -359,8 +507,14 @@
                 <tr>
                     <td><strong>Parser</strong></td>
                     <td>GPT-4.1</td>
-                    <td>Extract structured fields from denial text</td>
+                    <td>Extract structured fields, classify condition</td>
                     <td>payor, DRGs, condition match</td>
+                </tr>
+                <tr class="new-row">
+                    <td><strong>Condition Router</strong> <span class="new-badge">NEW</span></td>
+                    <td>Python</td>
+                    <td>Load condition-specific profile module</td>
+                    <td>Profile config, rebuttals, matchers</td>
                 </tr>
                 <tr>
                     <td><strong>Embedding</strong></td>
@@ -375,27 +529,69 @@
                     <td>Best-match gold letter</td>
                 </tr>
                 <tr>
-                    <td><strong>Writer</strong></td>
+                    <td><strong>Structured Data</strong></td>
                     <td>GPT-4.1</td>
-                    <td>Generate complete appeal letter</td>
+                    <td>Extract condition-relevant data from timeline</td>
+                    <td>Clinical summary, trends</td>
+                </tr>
+                <tr>
+                    <td><strong>Writer</strong> <span class="enhanced-badge">ENHANCED</span></td>
+                    <td>GPT-4.1</td>
+                    <td>Generate appeal with source fidelity + rebuttals</td>
                     <td>Persuasive appeal text</td>
                 </tr>
                 <tr>
-                    <td><strong>Structured Data Extractor**</strong></td>
+                    <td><strong>Assessment</strong> <span class="enhanced-badge">ENHANCED</span></td>
                     <td>GPT-4.1</td>
-                    <td>Extract sepsis data from labs/vitals/meds timeline</td>
-                    <td>Clinical scores, bundle compliance</td>
-                </tr>
-                <tr>
-                    <td><strong>Assessment</strong></td>
-                    <td>GPT-4.1</td>
-                    <td>Evaluate letter strength against criteria</td>
+                    <td>5-dimension evaluation (was 3)</td>
                     <td>Score, rating, detailed breakdown</td>
                 </tr>
             </table>
             <p style="font-size: 0.85rem; color: #666; margin-top: -0.5rem;">
-                <em>*POC only: Extraction Agent extracts account_id from denial text. In production, workqueue provides this directly - Extraction Agent becomes unnecessary.</em><br>
-                <em>**Now integrated into featurization_inference.py — runs automatically for every case.</em>
+                <em>*POC only: Extraction Agent extracts account_id from denial text. In production, workqueue provides this directly &mdash; Extraction Agent becomes unnecessary.</em>
+            </p>
+
+            <h3>Condition Profile Architecture</h3>
+            <p>
+                The base engine is <strong>condition-agnostic</strong>. All condition-specific logic lives in
+                pluggable profile modules (<code>condition_profiles/&lt;condition&gt;.py</code>). Each profile provides
+                14 required attributes (identity, paths, prompts, labels) plus optional extensions:
+            </p>
+            <table class="comparison-table">
+                <tr>
+                    <th>Extension</th>
+                    <th>Sepsis</th>
+                    <th>Respiratory Failure</th>
+                    <th>Mechanism</th>
+                </tr>
+                <tr>
+                    <td><strong>Clinical Scorer</strong></td>
+                    <td>SOFA (6 organs, deterministic)</td>
+                    <td>&mdash;</td>
+                    <td><code>hasattr()</code> guard</td>
+                </tr>
+                <tr>
+                    <td><strong>DOCX Rendering</strong></td>
+                    <td>SOFA table in appendix</td>
+                    <td>&mdash;</td>
+                    <td><code>hasattr()</code> guard</td>
+                </tr>
+                <tr class="new-row">
+                    <td><strong>Conditional Rebuttals</strong></td>
+                    <td>&mdash;</td>
+                    <td>3 physician-authored</td>
+                    <td><code>getattr()</code> with default</td>
+                </tr>
+                <tr>
+                    <td><strong>Numeric Cross-Check</strong></td>
+                    <td>Sepsis parameters</td>
+                    <td>Respiratory parameters</td>
+                    <td>LAB_VITAL_MATCHERS</td>
+                </tr>
+            </table>
+            <p>
+                Adding a new condition requires creating a profile module and providing data files &mdash; no base engine
+                code changes needed. The <code>TEMPLATE.py</code> file documents the full interface.
             </p>
 
             <h3>Why Multi-Agent Architecture?</h3>
@@ -403,22 +599,22 @@
                 <div class="benefit-card">
                     <div class="icon">&#9881;</div>
                     <h4>Specialization</h4>
-                    <p>Each agent is optimized for one task - better prompts, better results</p>
+                    <p>Each agent is optimized for one task &mdash; better prompts, better results</p>
                 </div>
                 <div class="benefit-card">
                     <div class="icon">&#9889;</div>
                     <h4>Parallelization</h4>
-                    <p>Long note extractions run concurrently on Databricks - faster processing</p>
+                    <p>Long note extractions run concurrently on Databricks &mdash; faster processing</p>
                 </div>
                 <div class="benefit-card">
                     <div class="icon">&#128270;</div>
                     <h4>Observability</h4>
-                    <p>Each agent's output is logged - easy debugging and quality monitoring</p>
+                    <p>Each agent's output is logged &mdash; easy debugging and quality monitoring</p>
                 </div>
-                <div class="benefit-card">
-                    <div class="icon">&#128736;</div>
-                    <h4>Maintainability</h4>
-                    <p>Update one agent without affecting others - isolated improvements</p>
+                <div class="benefit-card new">
+                    <div class="icon">&#128268;</div>
+                    <h4>Extensibility</h4>
+                    <p>Add new conditions via profile modules &mdash; no base engine changes needed</p>
                 </div>
             </div>
 
@@ -484,7 +680,7 @@
                     <td>$0.16</td>
                 </tr>
                 <tr>
-                    <td>Strength assessment</td>
+                    <td>Strength assessment (5 dimensions)</td>
                     <td>~15,000</td>
                     <td>~1,500</td>
                     <td>$0.05</td>
@@ -497,7 +693,7 @@
                 </tr>
             </table>
             <p style="font-size: 0.9rem; color: #666; margin-top: 0.5rem;">
-                <em>Based on Azure OpenAI GPT-4.1 standard pricing: $2.20/1M input, $8.80/1M output</em>
+                <em>Based on Azure OpenAI GPT-4.1 standard pricing: $2.20/1M input, $8.80/1M output. Cost is the same regardless of condition.</em>
             </p>
 
             <h3>Data Flow (Per Letter)</h3>
@@ -526,6 +722,12 @@
                     <td>GPT-4.1 structured extraction</td>
                     <td>payor, DRGs, condition match</td>
                 </tr>
+                <tr class="new-row">
+                    <td>3b. Load Profile</td>
+                    <td>Condition match result</td>
+                    <td>Python importlib</td>
+                    <td>Condition-specific config</td>
+                </tr>
                 <tr>
                     <td>4. Vector Search</td>
                     <td>Denial text</td>
@@ -536,58 +738,58 @@
                     <td>5. Query Clarity</td>
                     <td>account_id</td>
                     <td>Spark SQL query</td>
-                    <td>47 clinical note types</td>
+                    <td>47 note types + structured data</td>
                 </tr>
                 <tr>
                     <td>6. Extract Notes</td>
-                    <td>Long clinical notes</td>
-                    <td>GPT-4.1 (for notes > 8k chars)</td>
+                    <td>Clinical notes</td>
+                    <td>GPT-4.1 (parallel, profile-driven targets)</td>
                     <td>Timestamped evidence</td>
                 </tr>
                 <tr>
-                    <td>6b. Extract Structured**</td>
+                    <td>6b. Extract Structured</td>
                     <td>Labs/vitals/meds timeline</td>
-                    <td>GPT-4.1 extraction</td>
-                    <td>Clinical scores, bundle compliance</td>
+                    <td>GPT-4.1 (profile-driven context)</td>
+                    <td>Condition-relevant summary</td>
                 </tr>
                 <tr>
                     <td>7. Generate</td>
-                    <td>All context</td>
-                    <td>GPT-4.1 writer</td>
+                    <td>All context + rebuttals</td>
+                    <td>GPT-4.1 writer (source fidelity enforced)</td>
                     <td>Appeal letter text</td>
                 </tr>
                 <tr>
                     <td>8. Assess</td>
                     <td>Letter + all evidence</td>
-                    <td>GPT-4.1 assessment</td>
+                    <td>GPT-4.1 (5-dimension evaluation)</td>
                     <td>Score, rating, breakdown</td>
                 </tr>
                 <tr>
                     <td>9. Export</td>
-                    <td>Letter + assessment</td>
+                    <td>Letter + assessment + scores</td>
                     <td>python-docx</td>
                     <td>DOCX for CDI review</td>
                 </tr>
             </table>
             <p style="font-size: 0.85rem; color: #666; margin-top: 0.5rem;">
-                <em>*POC only: Step 2 extracts account_id from denial text. In production, workqueue provides this directly - step is skipped.</em><br>
-                <em>**Now integrated into featurization_inference.py — runs automatically for every case.</em>
+                <em>*POC only: Step 2 extracts account_id from denial text. In production, workqueue provides this directly &mdash; step is skipped.</em>
             </p>
 
             <div class="callout success">
-                <h4>First Multi-Agent System at Mercy</h4>
+                <h4>First Multi-Agent, Multi-Condition System at Mercy</h4>
                 <p>
-                    This architecture establishes a pattern for future AI initiatives. The same orchestration
-                    approach - specialized agents with clear interfaces - can be applied to other complex
-                    workflows across the organization. Lessons learned here accelerate future projects.
+                    This architecture establishes a pattern for future AI initiatives. The condition profile system
+                    means adding a new condition (e.g., heart failure, pneumonia) requires only a config file and
+                    data &mdash; no base engine changes. The same orchestration approach can be applied to other
+                    complex workflows across the organization.
                 </p>
             </div>
         </section>
     </main>
 
     <footer>
-        <p>Sepsis Appeal Engine | Mercy Hospital | Financial Data Science Team</p>
-        <p>Technical Architecture | January 2026</p>
+        <p>DRG Appeal Engine | Mercy Hospital | Financial Data Science Team</p>
+        <p>Technical Architecture | February 2026</p>
     </footer>
 </body>
 </html>
