@@ -1,8 +1,8 @@
 # DRG Appeal Engine
 
-**Multi-Agent AI for DRG Appeal Letter Automation**
+**Multi-Condition AI for DRG Appeal Letter Automation**
 
-Automated generation of DRG appeal letters for condition-specific insurance denials. Currently supports sepsis (DRG 870/871/872), extensible to other conditions via pluggable condition profiles. Built by the Financial Data Science team at Mercy Hospital.
+Automated generation of DRG appeal letters for condition-specific insurance denials. Currently supports **sepsis** (DRG 870/871/872) and **acute respiratory failure** (DRG 189/190/191/207/208), extensible to other conditions via pluggable condition profiles. Built by the Financial Data Science team at Mercy Hospital.
 
 ---
 
@@ -17,8 +17,8 @@ When insurance payors deny or downgrade DRG claims, this system generates profes
 5. **Numeric cross-check** - LLM extracts numeric claims from notes, Python validates against raw structured data
 6. **Detecting conflicts** - Compares physician notes vs structured data for discrepancies
 7. **Vector search** - Finds the most similar past winning appeal as a template
-8. **Generating appeals** - Creates patient-specific appeal letters using all available evidence
-9. **Assessing strength** - Evaluates the letter against clinical criteria, argument structure, and evidence quality
+8. **Generating appeals** - Creates patient-specific appeal letters with source fidelity rules and condition-specific rebuttals
+9. **Assessing strength** - Evaluates the letter across five dimensions: source fidelity, Propel criteria, argument structure, evidence quality, and formatting compliance
 
 **Single-Letter Processing:** Each denial is processed end-to-end in one run. This matches production workflow (Epic workqueue feeds one case at a time) and eliminates batch processing memory issues.
 
@@ -40,11 +40,12 @@ When insurance payors deny or downgrade DRG claims, this system generates profes
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │             DATA PREP LAYER (featurization_inference.py - per case)         │
 │                                                                             │
-│  [Denial PDF] ──► Parse & Extract Info ──► Query Clinical Notes            │
-│                                       ──► Query Structured Data             │
-│                                       ──► Calculate Clinical Scores         │
-│                                       ──► Numeric Cross-Check               │
-│                                       ──► Detect Conflicts                  │
+│  [Denial PDF] ──► Parse & Extract Info ──► Condition Routing               │
+│                                       ──► Query Clinical Notes             │
+│                                       ──► Query Structured Data            │
+│                                       ──► Calculate Clinical Scores        │
+│                                       ──► Numeric Cross-Check              │
+│                                       ──► Detect Conflicts                 │
 │                                                                             │
 │  Outputs: denial_text, denial_info, clinical_notes, structured_summary,    │
 │           clinical_scores, conflicts (notes vs structured data)             │
@@ -54,8 +55,9 @@ When insurance payors deny or downgrade DRG claims, this system generates profes
 │                   GENERATION LAYER (inference.py - per case)                │
 │                                                                             │
 │  Step 1: Vector search for best gold letter                                 │
-│  Step 2: Generate appeal (LLM: gold letter + notes + structured data)       │
-│  Step 3: Assess strength (scoped: Propel criteria, structure, evidence)     │
+│  Step 2: Generate appeal (source fidelity + conditional rebuttals)          │
+│  Step 3: 5-dimension assessment (fidelity, criteria, structure, evidence,  │
+│           formatting)                                                       │
 │  Step 4: Export to DOCX (includes conflicts appendix if any)                │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -63,17 +65,38 @@ When insurance payors deny or downgrade DRG claims, this system generates profes
 [DOCX Letter] ──► CDI Review ──► Approved Letter ──► Send to Payor
 ```
 
+## Supported Conditions
+
+| Condition | DRG Codes | Clinical Scoring | Conditional Rebuttals |
+|-----------|-----------|-----------------|----------------------|
+| **Sepsis** | 870, 871, 872 | SOFA (6 organs, deterministic) | None |
+| **Acute Respiratory Failure** | 189, 190, 191, 207, 208 | None | 3 physician-authored rebuttals |
+
+### Respiratory Failure — Conditional Rebuttals
+
+The ARF profile includes three physician-authored rebuttal templates (from Dr. Gharfeh and Dr. Bourland) that are conditionally injected when they match the payor's actual denial argument:
+
+| Rebuttal | Triggers When |
+|----------|--------------|
+| **Consecutive SpO2 Readings** | Denial requires "consecutive" or "sequential" SpO2 readings |
+| **Persistent Symptoms** | Denial argues symptoms were not "persistent" or "continuous" |
+| **Proprietary Clinical Criteria** | Denial imposes thresholds beyond nationally recognized standards |
+
+The engine reads the denial, decides which rebuttals apply, and weaves them into the letter. Rebuttals that don't match the denial are not applied.
+
 ## Key Features
 
 | Feature | Description |
 |---------|-------------|
 | **Condition Profiles** | Pluggable condition modules — add a new condition by providing data files + a config module |
+| **Conditional Rebuttals** | Physician-authored rebuttal templates injected only when they match the payor's actual argument |
+| **Source Fidelity** | Letters only cite Propel-approved references — never list or validate the payor's cited sources |
 | **Single-Letter Processing** | One denial at a time — no batch processing, no memory issues |
 | **Evidence Hierarchy** | Physician notes (primary) + structured data (supporting) for comprehensive evidence |
 | **Programmatic Clinical Scoring** | Deterministic scoring from raw data (e.g., SOFA for sepsis) — zero LLM calls |
 | **Numeric Cross-Check** | LLM-extracted numeric claims validated against closest-in-time raw values |
 | **Conflict Detection** | Flags discrepancies between notes and structured data for CDI review |
-| **Scoped Assessment** | Each assessment dimension evaluates against its designated evidence source only |
+| **5-Dimension Assessment** | Source fidelity, Propel criteria, argument structure, evidence quality, formatting compliance |
 | **Assertion-Only Language** | No hedging, conceding, or defensive phrasing — every sentence advances the argument |
 | **Vector Search** | Embeddings-based similarity matching finds the most relevant past denial |
 | **Gold Letter Learning** | Uses winning appeals as templates — proven arguments get reused |
@@ -109,27 +132,31 @@ profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
 | **Assessment** | `ASSESSMENT_CONDITION_LABEL`, `ASSESSMENT_CRITERIA_LABEL` |
 | **Clinical Scorer** (optional) | `calculate_clinical_scores()`, `write_clinical_scores_table()` |
 | **DOCX Rendering** (optional) | `format_scores_for_prompt()`, `render_scores_in_docx()`, `render_scores_status_note()` |
+| **Conditional Rebuttals** (optional) | `CONDITIONAL_REBUTTALS` (list of rebuttal dicts) |
 
 ### Adding a New Condition
 
 1. Copy `condition_profiles/TEMPLATE.py` to `condition_profiles/<your_condition>.py`
 2. Fill in all required constants (see TEMPLATE.py for documentation)
-3. Add gold standard letters to a `utils/` subdirectory
-4. Add Propel definition PDF to `utils/propel_data/`
+3. Add gold standard letters to a workspace subdirectory
+4. Add Propel definition PDF to the propel_data directory
 5. Optionally implement a clinical scorer (like SOFA for sepsis)
-6. Set `CONDITION_PROFILE = "<your_condition>"` in each notebook
-7. Run `featurization_train.py` to ingest gold letters and Propel data
-8. Process cases normally with `featurization_inference.py` then `inference.py`
+6. Optionally add conditional rebuttals for common payor denial arguments
+7. Set `CONDITION_PROFILE = "<your_condition>"` in each notebook
+8. Run `featurization_train.py` to ingest gold letters and Propel data
+9. Process cases normally with `featurization_inference.py` then `inference.py`
 
 ## Appeal Strength Assessment
 
-After letter generation, an LLM evaluates the appeal across three scoped dimensions:
+After letter generation, an LLM evaluates the appeal across five scoped dimensions:
 
 | Dimension | Evaluates Against | Description |
 |-----------|-------------------|-------------|
+| **Source Fidelity** | Propel document | Did the letter use only Propel-approved criteria and references? Did it avoid citing the payor's references unnecessarily? |
 | **Propel Criteria** | Propel definition only | Coverage of official clinical criteria. Scoped strictly to the Propel definition text — does not infer criteria from other sources. |
-| **Argument Structure** | Denial letter + gold template | How well the letter rebuts the denial and follows proven structure |
+| **Argument Structure** | Denial letter + gold template | How well the letter rebuts the denial, follows proven structure, and applies conditional rebuttals correctly |
 | **Evidence Quality** | Clinical notes + structured data | Whether specific values and timestamps are cited |
+| **Formatting Compliance** | Letter format rules | No summary table at the end; all clinical data embedded in the argument |
 
 Each finding is marked present, could strengthen, or missing. The overall score (1-10) with LOW/MODERATE/HIGH rating appears in the DOCX before the letter body for CDI reviewer reference.
 
@@ -138,8 +165,9 @@ Each finding is marked present, could strengthen, or missing. The overall score 
 ```
 SEPSIS/
 ├── condition_profiles/
-│   ├── __init__.py                   # Package init
-│   ├── sepsis.py                     # Sepsis condition profile (config + SOFA scorer + DOCX rendering)
+│   ├── __init__.py                   # Profile validation (REQUIRED_ATTRIBUTES)
+│   ├── sepsis.py                     # Sepsis profile (config + SOFA scorer + DOCX rendering)
+│   ├── respiratory_failure.py        # ARF profile (config + conditional rebuttals)
 │   └── TEMPLATE.py                   # Template for creating new condition profiles
 ├── data/
 │   ├── featurization_train.py        # ONE-TIME: Knowledge base ingestion (gold letters + Propel)
@@ -147,16 +175,15 @@ SEPSIS/
 │   └── structured_data_ingestion.py  # PER-CASE: Labs, vitals, meds, diagnoses from Clarity
 ├── model/
 │   └── inference.py                  # GENERATION: Vector search, write, assess, export
-├── utils/
-│   ├── gold_standard_appeals.gold_standard_appeals__sepsis_only/  # Current gold letters + default template
-│   ├── gold_standard_appeals_sepsis_multiple/ # Future use
-│   ├── sample_denial_letters/        # Denial letters to test with (PDFs)
-│   ├── propel_data/                  # Clinical criteria definitions (PDFs)
-│   └── outputs/                      # Generated appeal letters (DOCX)
+├── tests/
+│   └── test_condition_profiles.py    # Unit tests (35 tests — profiles, validation, prompt assembly)
 ├── docs/
-│   ├── plans/                        # Design documents
-│   ├── rebuttal-engine-overview.html # Technical overview (tabbed, detailed)
-│   └── appeals-team-overview.html    # Simplified overview for appeals team
+│   ├── plans/                        # Design & implementation plans
+│   ├── drg_appeal_engine_v2_synopsis.html  # Executive overview (multi-condition)
+│   ├── rebuttal-engine-overview.html       # Technical overview (tabbed, detailed)
+│   ├── appeals-team-overview.html          # Simplified overview for appeals team
+│   └── technical-architecture.html         # Architecture deep-dive
+├── archive/                          # Older versions, POC code, source materials
 ├── test_queries.sql                  # Validation queries for Unity Catalog
 ├── README.md                         # This file
 └── claude.md                         # Master prompt (project documentation)
@@ -205,7 +232,7 @@ dbutils.library.restartPython()
 ### 2. One-Time Setup
 In `featurization_train.py`:
 ```python
-CONDITION_PROFILE = "sepsis"
+CONDITION_PROFILE = "respiratory_failure"  # or "sepsis"
 RUN_GOLD_INGESTION = True
 RUN_PROPEL_INGESTION = True
 ```
@@ -214,7 +241,7 @@ Run the notebook. This ingests gold standard letters and Propel clinical definit
 ### 3. Prepare Case Data
 In `featurization_inference.py`, set the denial PDF path:
 ```python
-CONDITION_PROFILE = "sepsis"
+CONDITION_PROFILE = "respiratory_failure"  # or "sepsis"
 DENIAL_PDF_PATH = "/path/to/denial_letter.pdf"
 ```
 Run the notebook to parse the denial, extract clinical notes, calculate clinical scores, and write all case data to tables.
@@ -222,15 +249,15 @@ Run the notebook to parse the denial, extract clinical notes, calculate clinical
 ### 4. Generate Appeal
 Run `inference.py`:
 ```python
-CONDITION_PROFILE = "sepsis"
+CONDITION_PROFILE = "respiratory_failure"  # or "sepsis"
 ```
-This reads prepared case data, generates the appeal letter, assesses its strength, and exports a DOCX to `utils/outputs/`.
+This reads prepared case data, generates the appeal letter, assesses its strength, and exports a DOCX.
 
 ### 5. Review Output
 DOCX structure:
-- Internal review: assessment + clinical scores status + conflicts (if any)
+- Internal review: assessment + clinical scores status (if applicable) + conflicts (if any)
 - Letter body (LLM-generated)
-- Appendix: Clinical Scores Table (if applicable)
+- Appendix: Clinical Scores Table (if applicable, e.g., SOFA for sepsis)
 
 ## Configuration
 
