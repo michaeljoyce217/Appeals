@@ -142,7 +142,13 @@ WRITER_SCORING_INSTRUCTIONS = """5. SOFA SCORING:
    - If SOFA scores are provided above (total >= 2), reference them narratively when arguing organ dysfunction
    - Cite the individual organ scores and total score as clinical evidence of organ dysfunction severity
    - Do NOT include a SOFA table in the letter text — the table is rendered separately in the document
-   - If no SOFA scores are provided, do not mention SOFA scoring"""
+   - If no SOFA scores are provided, do not mention SOFA scoring
+
+   RENAL TERMINOLOGY (CRITICAL): Do NOT use the term "acute kidney injury" or "AKI" unless the creatinine meets KDIGO criteria (creatinine >= 1.5x baseline). If the creatinine ratio is below 1.5x baseline, use "impaired renal function" instead. The creatinine value can still count toward the SOFA score even if it does not meet KDIGO AKI criteria. A physician may document "AKI" but the appeal letter must use the clinically supported terminology.
+
+   POA-BASED TIMING: When citing the most severe clinical values:
+   - If the sepsis diagnosis is POA "Y" (present on admission): use the most severe values within 24 hours of admission.
+   - If the sepsis diagnosis is POA "N" (not present on admission): use the most severe values within 24 hours of the first sepsis documentation."""
 
 # =============================================================================
 # Assessment Labels
@@ -290,65 +296,78 @@ def score_organ(organ, value):
 
 def calculate_clinical_scores(account_id, spark, tables):
     """
-    Calculate SOFA scores from raw structured data tables.
-    Reads directly from labs, vitals, meds tables.
-    Returns dict with organ_scores, total_score, organs_scored.
+    Calculate SOFA scores from raw structured data tables using a 24-hour sliding window.
+
+    Collects all timestamped lab/vital/med values, then finds the 24-hour window
+    that produces the highest total SOFA score. This ensures all component values
+    used in the final score fall within a clinically valid 24-hour period.
+
     Zero LLM calls — purely deterministic.
 
     Args:
         account_id: The hospital account ID
         spark: SparkSession instance
-        tables: dict with keys "labs", "vitals", "meds" → full table names
+        tables: dict with keys "labs", "vitals", "meds" -> full table names
+
+    Returns:
+        dict with organ_scores, total_score, organs_scored, vasopressor_detail,
+        window_start, window_end
     """
-    print("  Calculating SOFA scores from raw data...")
-    organ_scores = {}
-    vasopressor_detail = []
+    from datetime import timedelta
+
+    print("  Calculating SOFA scores (24h sliding window)...")
 
     labs_table = tables["labs"]
     vitals_table = tables["vitals"]
     meds_table = tables["meds"]
 
-    # --- Gather lab values ---
+    # --- Gather all raw values ---
     try:
-        labs_df = spark.sql(f"""
+        labs_rows = spark.sql(f"""
             SELECT LAB_NAME, lab_value, EVENT_TIMESTAMP
             FROM {labs_table}
-            WHERE lab_value IS NOT NULL
+            WHERE lab_value IS NOT NULL AND EVENT_TIMESTAMP IS NOT NULL
             ORDER BY EVENT_TIMESTAMP ASC
-        """)
-        labs_rows = labs_df.collect()
+        """).collect()
     except Exception as e:
         print(f"    Warning: Could not read labs: {e}")
         labs_rows = []
 
-    # --- Gather vital values ---
     try:
-        vitals_df = spark.sql(f"""
+        vitals_rows = spark.sql(f"""
             SELECT VITAL_NAME, vital_value, EVENT_TIMESTAMP
             FROM {vitals_table}
-            WHERE vital_value IS NOT NULL
+            WHERE vital_value IS NOT NULL AND EVENT_TIMESTAMP IS NOT NULL
             ORDER BY EVENT_TIMESTAMP ASC
-        """)
-        vitals_rows = vitals_df.collect()
+        """).collect()
     except Exception as e:
         print(f"    Warning: Could not read vitals: {e}")
         vitals_rows = []
 
-    # --- Gather med values ---
     try:
-        meds_df = spark.sql(f"""
+        meds_rows = spark.sql(f"""
             SELECT MED_NAME, MED_DOSE, EVENT_TIMESTAMP
             FROM {meds_table}
-            WHERE MED_NAME IS NOT NULL
+            WHERE MED_NAME IS NOT NULL AND EVENT_TIMESTAMP IS NOT NULL
             ORDER BY EVENT_TIMESTAMP ASC
-        """)
-        meds_rows = meds_df.collect()
+        """).collect()
     except Exception as e:
         print(f"    Warning: Could not read meds: {e}")
         meds_rows = []
 
-    # --- Process labs for worst values ---
-    lab_worsts = {}
+    # ---- Collect all timestamped measurements per organ ----
+    # Each entry: (value, timestamp, score, raw_display)
+    organ_candidates = {
+        "respiratory": [],
+        "coagulation": [],
+        "liver": [],
+        "cardiovascular": [],
+        "cns": [],
+        "renal": [],
+    }
+    all_timestamps = []
+
+    # PaO2 and FiO2 need pairing, so collect separately first
     pao2_values = []
     fio2_values = []
 
@@ -356,7 +375,7 @@ def calculate_clinical_scores(account_id, spark, tables):
         name = row["LAB_NAME"]
         val = safe_float(row["lab_value"])
         ts = row["EVENT_TIMESTAMP"]
-        if val is None:
+        if val is None or ts is None:
             continue
 
         for category, matcher in LAB_VITAL_MATCHERS.items():
@@ -371,82 +390,66 @@ def calculate_clinical_scores(account_id, spark, tables):
                 fio2_values.append((val, ts))
             elif category == "platelets":
                 score = score_organ("coagulation", val)
-                if "coagulation" not in lab_worsts or score > lab_worsts["coagulation"][2]:
-                    lab_worsts["coagulation"] = (val, ts, score)
+                organ_candidates["coagulation"].append((val, ts, score, str(val)))
+                all_timestamps.append(ts)
             elif category == "bilirubin":
                 score = score_organ("liver", val)
-                if "liver" not in lab_worsts or score > lab_worsts["liver"][2]:
-                    lab_worsts["liver"] = (val, ts, score)
+                organ_candidates["liver"].append((val, ts, score, str(val)))
+                all_timestamps.append(ts)
             elif category == "creatinine":
                 score = score_organ("renal", val)
-                if "renal" not in lab_worsts or score > lab_worsts["renal"][2]:
-                    lab_worsts["renal"] = (val, ts, score)
+                organ_candidates["renal"].append((val, ts, score, str(val)))
+                all_timestamps.append(ts)
 
-    # --- Respiratory: PaO2/FiO2 ratio ---
-    if pao2_values and fio2_values:
-        best_resp_score = 0
-        best_resp_val = None
-        best_resp_ts = None
-        for pao2_val, pao2_ts in pao2_values:
-            closest_fio2 = None
-            closest_diff = None
-            for fio2_val, fio2_ts in fio2_values:
-                if fio2_val <= 0:
-                    continue
-                actual_fio2 = fio2_val if fio2_val <= 1.0 else fio2_val / 100.0
-                if actual_fio2 <= 0:
-                    continue
-                diff = abs((pao2_ts - fio2_ts).total_seconds()) if pao2_ts and fio2_ts else float('inf')
-                if closest_diff is None or diff < closest_diff:
-                    closest_diff = diff
-                    closest_fio2 = actual_fio2
-            if closest_fio2 and closest_fio2 > 0:
-                ratio = pao2_val / closest_fio2
-                score = score_organ("respiratory", ratio)
-                if score > best_resp_score:
-                    best_resp_score = score
-                    best_resp_val = round(ratio, 1)
-                    best_resp_ts = pao2_ts
-        if best_resp_val is not None:
-            organ_scores["respiratory"] = {
-                "score": best_resp_score,
-                "value": f"PaO2/FiO2 = {best_resp_val}",
-                "timestamp": str(best_resp_ts) if best_resp_ts else None,
-            }
+    # Build respiratory candidates from PaO2/FiO2 pairs
+    for pao2_val, pao2_ts in pao2_values:
+        closest_fio2 = None
+        closest_diff = None
+        for fio2_val, fio2_ts in fio2_values:
+            if fio2_val <= 0:
+                continue
+            actual_fio2 = fio2_val if fio2_val <= 1.0 else fio2_val / 100.0
+            if actual_fio2 <= 0:
+                continue
+            diff = abs((pao2_ts - fio2_ts).total_seconds())
+            if closest_diff is None or diff < closest_diff:
+                closest_diff = diff
+                closest_fio2 = actual_fio2
+        if closest_fio2 and closest_fio2 > 0:
+            ratio = pao2_val / closest_fio2
+            score = score_organ("respiratory", ratio)
+            organ_candidates["respiratory"].append(
+                (ratio, pao2_ts, score, f"PaO2/FiO2 = {round(ratio, 1)}")
+            )
+            all_timestamps.append(pao2_ts)
 
-    # --- Process vitals for worst values ---
+    # Vitals: MAP and GCS
     for row in vitals_rows:
         name = row["VITAL_NAME"]
         val = safe_float(row["vital_value"])
         ts = row["EVENT_TIMESTAMP"]
-        if val is None:
+        if val is None or ts is None:
             continue
 
-        # MAP
         if match_name(name, LAB_VITAL_MATCHERS["map"]):
             score = score_organ("cardiovascular_map", val)
-            if "cardiovascular" not in organ_scores or score > organ_scores.get("cardiovascular", {}).get("score", 0):
-                organ_scores["cardiovascular"] = {
-                    "score": score,
-                    "value": f"MAP = {val}",
-                    "timestamp": str(ts) if ts else None,
-                }
+            organ_candidates["cardiovascular"].append(
+                (val, ts, score, f"MAP = {val}")
+            )
+            all_timestamps.append(ts)
 
-        # GCS
         if match_name(name, LAB_VITAL_MATCHERS["gcs"]):
             if val != val:  # NaN check
                 continue
             int_val = int(round(val))
             score = score_organ("cns", int_val)
-            if "cns" not in organ_scores or score > organ_scores.get("cns", {}).get("score", 0):
-                organ_scores["cns"] = {
-                    "score": score,
-                    "value": f"GCS = {int_val}",
-                    "timestamp": str(ts) if ts else None,
-                }
+            organ_candidates["cns"].append(
+                (int_val, ts, score, f"GCS = {int_val}")
+            )
+            all_timestamps.append(ts)
 
-    # --- Process meds for vasopressor scoring ---
-    vasopressor_found = {}
+    # Meds: vasopressors
+    vasopressor_entries = []
     for row in meds_rows:
         med_name = row["MED_NAME"]
         if not med_name:
@@ -455,25 +458,90 @@ def calculate_clinical_scores(account_id, spark, tables):
         if category:
             dose = safe_float(row["MED_DOSE"])
             ts = row["EVENT_TIMESTAMP"]
-            vasopressor_detail.append({
+            if ts is None:
+                continue
+            vasopressor_entries.append({
                 "drug": category,
                 "dose": dose,
-                "timestamp": str(ts) if ts else None,
+                "timestamp": ts,
             })
-            if category not in vasopressor_found:
-                vasopressor_found[category] = (dose, ts)
-            elif dose is not None:
-                existing_dose = vasopressor_found[category][0]
-                if existing_dose is None or dose > existing_dose:
-                    vasopressor_found[category] = (dose, ts)
+            all_timestamps.append(ts)
 
-    # Override cardiovascular score if vasopressors found
-    if vasopressor_found:
-        max_cv_score = organ_scores.get("cardiovascular", {}).get("score", 0)
-        cv_detail = organ_scores.get("cardiovascular", {}).get("value", "")
-        cv_ts = organ_scores.get("cardiovascular", {}).get("timestamp")
+    # ---- Edge case: no timestamps at all ----
+    if not all_timestamps:
+        print("    No timestamped values found — returning empty scores.")
+        return {
+            "organ_scores": {},
+            "total_score": 0,
+            "organs_scored": 0,
+            "vasopressor_detail": [],
+            "window_start": None,
+            "window_end": None,
+        }
 
-        for drug, (dose, ts) in vasopressor_found.items():
+    # ---- Sliding window: find the 24h window with highest total SOFA ----
+    # Candidate windows are anchored at each unique measurement timestamp
+    all_timestamps = sorted(set(all_timestamps))
+    best_window = None
+    best_total = -1
+    best_organs = None
+    best_vasopressor_detail = None
+
+    for anchor_ts in all_timestamps:
+        window_end = anchor_ts + timedelta(hours=24)
+
+        # Score each organ using the WORST value within this window
+        window_organs = {}
+
+        for organ_key, candidates in organ_candidates.items():
+            if organ_key == "cardiovascular":
+                # Handle cardiovascular separately (MAP + vasopressor override)
+                continue
+            best_in_window = None
+            for val, ts, score, display in candidates:
+                if anchor_ts <= ts <= window_end:
+                    if best_in_window is None or score > best_in_window[2]:
+                        best_in_window = (val, ts, score, display)
+            if best_in_window:
+                window_organs[organ_key] = {
+                    "score": best_in_window[2],
+                    "value": best_in_window[3],
+                    "timestamp": str(best_in_window[1]),
+                }
+
+        # Cardiovascular: MAP + vasopressor override within window
+        map_candidates = organ_candidates["cardiovascular"]
+        best_cv_score = 0
+        best_cv_value = ""
+        best_cv_ts = None
+
+        for val, ts, score, display in map_candidates:
+            if anchor_ts <= ts <= window_end:
+                if score > best_cv_score:
+                    best_cv_score = score
+                    best_cv_value = display
+                    best_cv_ts = ts
+
+        window_vasopressor_detail = []
+        window_vasopressors = {}
+        for entry in vasopressor_entries:
+            ts = entry["timestamp"]
+            if anchor_ts <= ts <= window_end:
+                window_vasopressor_detail.append({
+                    "drug": entry["drug"],
+                    "dose": entry["dose"],
+                    "timestamp": str(ts),
+                })
+                drug = entry["drug"]
+                dose = entry["dose"]
+                if drug not in window_vasopressors:
+                    window_vasopressors[drug] = (dose, ts)
+                elif dose is not None:
+                    existing_dose = window_vasopressors[drug][0]
+                    if existing_dose is None or dose > existing_dose:
+                        window_vasopressors[drug] = (dose, ts)
+
+        for drug, (dose, ts) in window_vasopressors.items():
             cv_score = 2
             if drug == "dopamine" and dose is not None:
                 if dose > 15:
@@ -492,39 +560,47 @@ def calculate_clinical_scores(account_id, spark, tables):
             elif drug in ("epinephrine", "norepinephrine"):
                 cv_score = 3
 
-            if cv_score > max_cv_score:
-                max_cv_score = cv_score
+            if cv_score > best_cv_score:
+                best_cv_score = cv_score
                 dose_str = f" {dose}" if dose is not None else ""
-                cv_detail = f"{drug}{dose_str}"
-                cv_ts = str(ts) if ts else None
+                best_cv_value = f"{drug}{dose_str}"
+                best_cv_ts = ts
 
-        organ_scores["cardiovascular"] = {
-            "score": max_cv_score,
-            "value": cv_detail,
-            "timestamp": cv_ts,
-        }
+        if best_cv_score > 0 or best_cv_ts is not None:
+            window_organs["cardiovascular"] = {
+                "score": best_cv_score,
+                "value": best_cv_value,
+                "timestamp": str(best_cv_ts) if best_cv_ts else None,
+            }
 
-    # --- Add lab-derived organ scores ---
-    for organ_key, (val, ts, score) in lab_worsts.items():
-        organ_scores[organ_key] = {
-            "score": score,
-            "value": str(val),
-            "timestamp": str(ts) if ts else None,
-        }
+        # Calculate total for this window
+        window_total = sum(o["score"] for o in window_organs.values())
 
-    # --- Compute totals ---
-    total_score = sum(o["score"] for o in organ_scores.values())
-    organs_scored = len(organ_scores)
+        if window_total > best_total:
+            best_total = window_total
+            best_organs = window_organs
+            best_window = (anchor_ts, window_end)
+            best_vasopressor_detail = window_vasopressor_detail
 
-    print(f"    SOFA Total: {total_score} ({organs_scored} organs scored)")
-    for organ, data in organ_scores.items():
-        print(f"      {organ}: {data['score']} ({data['value']} at {data['timestamp']})")
+    # ---- Output ----
+    organs_scored = len(best_organs) if best_organs else 0
+    window_start_str = str(best_window[0])[:19] if best_window else None
+    window_end_str = str(best_window[1])[:19] if best_window else None
+
+    print(f"    SOFA Total: {best_total} ({organs_scored} organs scored)")
+    if best_window:
+        print(f"    24h window: {window_start_str} to {window_end_str}")
+    if best_organs:
+        for organ, data in best_organs.items():
+            print(f"      {organ}: {data['score']} ({data['value']} at {data['timestamp']})")
 
     return {
-        "organ_scores": organ_scores,
-        "total_score": total_score,
+        "organ_scores": best_organs or {},
+        "total_score": best_total if best_total >= 0 else 0,
         "organs_scored": organs_scored,
-        "vasopressor_detail": vasopressor_detail,
+        "vasopressor_detail": best_vasopressor_detail or [],
+        "window_start": window_start_str,
+        "window_end": window_end_str,
     }
 
 
@@ -541,6 +617,8 @@ def write_clinical_scores_table(account_id, scores_result, spark, table_name):
         organs_scored INT,
         organ_scores STRING,
         vasopressor_detail STRING,
+        window_start STRING,
+        window_end STRING,
         created_at TIMESTAMP
     ) USING DELTA
     """)
@@ -551,6 +629,8 @@ def write_clinical_scores_table(account_id, scores_result, spark, table_name):
         "organs_scored": scores_result["organs_scored"],
         "organ_scores": json.dumps(scores_result["organ_scores"]),
         "vasopressor_detail": json.dumps(scores_result.get("vasopressor_detail", [])),
+        "window_start": scores_result.get("window_start"),
+        "window_end": scores_result.get("window_end"),
         "created_at": datetime.now()
     }]
 
@@ -560,6 +640,8 @@ def write_clinical_scores_table(account_id, scores_result, spark, table_name):
         StructField("organs_scored", IntegerType(), True),
         StructField("organ_scores", StringType(), True),
         StructField("vasopressor_detail", StringType(), True),
+        StructField("window_start", StringType(), True),
+        StructField("window_end", StringType(), True),
         StructField("created_at", TimestampType(), True)
     ])
 
@@ -581,6 +663,52 @@ ORGAN_DISPLAY_NAMES = {
     "renal": "Renal (Creatinine)",
 }
 
+# SOFA scoring criteria descriptions for each organ system (displayed in SOFA table)
+SOFA_CRITERIA = {
+    "respiratory": {
+        0: "PaO2/FiO2 >= 400",
+        1: "PaO2/FiO2 300-399",
+        2: "PaO2/FiO2 200-299",
+        3: "PaO2/FiO2 100-199",
+        4: "PaO2/FiO2 < 100",
+    },
+    "coagulation": {
+        0: "Platelets >= 150 K/uL",
+        1: "Platelets 100-149 K/uL",
+        2: "Platelets 50-99 K/uL",
+        3: "Platelets 20-49 K/uL",
+        4: "Platelets < 20 K/uL",
+    },
+    "liver": {
+        0: "Bilirubin < 1.2 mg/dL",
+        1: "Bilirubin 1.2-1.9 mg/dL",
+        2: "Bilirubin 2.0-5.9 mg/dL",
+        3: "Bilirubin 6.0-11.9 mg/dL",
+        4: "Bilirubin >= 12.0 mg/dL",
+    },
+    "cardiovascular": {
+        0: "MAP >= 70, no vasopressors",
+        1: "MAP < 70",
+        2: "Dopamine <= 5 or dobutamine",
+        3: "Dopamine > 5 or epi/norepi <= 0.1",
+        4: "Dopamine > 15 or epi/norepi > 0.1",
+    },
+    "cns": {
+        0: "GCS = 15",
+        1: "GCS 13-14",
+        2: "GCS 10-12",
+        3: "GCS 6-9",
+        4: "GCS < 6",
+    },
+    "renal": {
+        0: "Creatinine < 1.2 mg/dL",
+        1: "Creatinine 1.2-1.9 mg/dL",
+        2: "Creatinine 2.0-3.4 mg/dL",
+        3: "Creatinine 3.5-4.9 mg/dL",
+        4: "Creatinine >= 5.0 mg/dL",
+    },
+}
+
 
 def format_scores_for_prompt(scores_data):
     """Format SOFA scores as a markdown table for prompt inclusion."""
@@ -589,14 +717,20 @@ def format_scores_for_prompt(scores_data):
 
     lines = []
     lines.append("SOFA SCORES (calculated from raw clinical data):")
+    # Include the 24-hour window if available
+    if scores_data.get("window_start") and scores_data.get("window_end"):
+        lines.append(f"24-hour scoring window: {scores_data['window_start']} to {scores_data['window_end']}")
     lines.append("")
-    lines.append("| Organ System | Score | Value | Timestamp |")
+    lines.append("| Organ System | Score | Value | Criteria |")
     lines.append("|---|---|---|---|")
     for organ_key in ["respiratory", "coagulation", "liver", "cardiovascular", "cns", "renal"]:
         if organ_key in scores_data["organ_scores"]:
             data = scores_data["organ_scores"][organ_key]
+            if data["score"] == 0:
+                continue  # Omit zero-score rows
             display = ORGAN_DISPLAY_NAMES.get(organ_key, organ_key)
-            lines.append(f"| {display} | {data['score']} | {data['value']} | {data.get('timestamp', 'N/A')} |")
+            criteria = SOFA_CRITERIA.get(organ_key, {}).get(data["score"], "")
+            lines.append(f"| {display} | {data['score']} | {data['value']} | {criteria} |")
     lines.append(f"| **TOTAL** | **{scores_data['total_score']}** | {scores_data['organs_scored']} organs scored | |")
     lines.append("")
 
@@ -634,29 +768,39 @@ def render_scores_in_docx(doc, scores_data):
     sofa_header.add_run("Appendix: SOFA Score Summary").bold = True
     sofa_header.paragraph_format.space_after = Pt(4)
 
+    # Show the 24-hour scoring window if available
+    if scores_data.get("window_start") and scores_data.get("window_end"):
+        window_note = doc.add_paragraph()
+        window_note.add_run("Scoring Window: ").bold = True
+        window_note.add_run(f"{scores_data['window_start']} to {scores_data['window_end']}")
+        window_note.paragraph_format.space_after = Pt(4)
+
     organ_order = ["respiratory", "coagulation", "liver", "cardiovascular", "cns", "renal"]
-    organs_with_data = [o for o in organ_order if o in scores_data["organ_scores"]]
+    # Filter to non-zero scores only
+    organs_with_data = [
+        o for o in organ_order
+        if o in scores_data["organ_scores"] and scores_data["organ_scores"][o]["score"] > 0
+    ]
 
     table = doc.add_table(rows=1 + len(organs_with_data) + 1, cols=4, style='Table Grid')
     # Header row
     hdr = table.rows[0]
-    for i, text in enumerate(["Organ System", "Score", "Value", "Timestamp"]):
+    for i, text in enumerate(["Organ System", "Score", "Value", "Criteria"]):
         hdr.cells[i].text = text
         for run in hdr.cells[i].paragraphs[0].runs:
             run.bold = True
 
-    # Data rows
+    # Data rows (zero-score rows omitted)
     row_idx = 1
-    for organ_key in organ_order:
-        if organ_key not in scores_data["organ_scores"]:
-            continue
+    for organ_key in organs_with_data:
         data = scores_data["organ_scores"][organ_key]
         display = ORGAN_DISPLAY_NAMES.get(organ_key, organ_key)
+        criteria = SOFA_CRITERIA.get(organ_key, {}).get(data["score"], "")
         row = table.rows[row_idx]
         row.cells[0].text = display
         row.cells[1].text = str(data["score"])
         row.cells[2].text = str(data.get("value", ""))
-        row.cells[3].text = str(data.get("timestamp", ""))[:19] if data.get("timestamp") else ""
+        row.cells[3].text = criteria
         row_idx += 1
 
     # Total row

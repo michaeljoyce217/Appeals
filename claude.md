@@ -392,6 +392,18 @@ After writing or modifying code in this project, verify:
 5. SOFA scoring logic uses deterministic Python, not LLM calls.
 6. Output would match the previous version unless a change was explicitly requested.
 
+## Deferred SME Feedback (2026-02-23)
+
+The following feedback items from SME review require external decisions or data before implementation:
+
+| # | Item | Blocker | Status |
+|---|------|---------|--------|
+| 1 | CMS bundle compliance — don't use with non-CMS payors | Need payor classification data | Deferred |
+| 2 | Critical care charges — verify CPT 99291 before citing | Need charge data access | Deferred |
+| 3 | ARF respiratory rate threshold — >20 (Propel/ACDIS) vs >30 (Mercy Q-tip) | Needs internal consensus | Blocked |
+| 4 | ARF case pre-screening — only appeal cases matching WON patterns | Needs outcome data + screening logic | Deferred |
+| 5 | Propel terminology — replace "Propel criteria" with "consensus-based guidelines" in letter text | Pending team decision | TODO |
+
 ## Team
 
 **Financial Data Science** | Mercy Hospital

@@ -219,7 +219,19 @@ WRITER_SCORING_INSTRUCTIONS = """5. QUANTIFY ACUTE RESPIRATORY FAILURE using dia
    - Hypoxic criteria: PaO2 < 60 mmHg, SpO2 < 91% on room air, P/F ratio < 300
    - Hypercapnic criteria: PaCO2 > 50 mmHg with pH < 7.35
    - Acute-on-chronic indicators: >= 10 mmHg change from baseline PaO2 or PaCO2
-   - Document oxygen delivery method and escalation of respiratory support"""
+   - Document oxygen delivery method and escalation of respiratory support
+
+   SPO2 THRESHOLD (CRITICAL): The hypoxic SpO2 criterion is STRICTLY LESS THAN 91%. An SpO2 of 91% is low but does NOT meet the hypoxic threshold. Do NOT cite SpO2 values of 91% or higher as evidence of hypoxemia. Only SpO2 values of 90% or below qualify.
+
+   EVIDENCE TIMING (CRITICAL): Use clinical values from the presentation/admission timeframe ONLY. Values from 2 or more days after admission do not support an acute diagnosis at presentation. When the condition is POA, focus on the first 24 hours of admission.
+
+   DOCUMENTATION CONSISTENCY: Do NOT use a clinical value as evidence of acute respiratory failure if the same documentation describes the patient as "stable" at that time. A value documented alongside "stable condition" cannot simultaneously support an acute diagnosis.
+
+   P/F RATIO: If the P/F ratio is not documented by the provider, calculate it from available PaO2 and FiO2 values when both are available. P/F ratio < 300 supports ARF. Do NOT apply the P/F ratio criterion to acute-on-chronic respiratory failure patients.
+
+   OXYGEN DELIVERY CONTEXT: When citing SpO2 readings, verify the oxygen delivery method. If the patient is on high-flow nasal cannula but FiO2 is set at 21% or less, this is essentially room air (~20% FiO2). Clarify whether the SpO2 was on room air or supplemental oxygen, as this affects the hypoxic criterion.
+
+   SIGNS AND SYMPTOMS: Include ALL documented signs and symptoms of respiratory distress in the clinical presentation: dyspnea, difficulty breathing, increased work of breathing, use of accessory muscles, tachypnea, cyanosis, altered mental status related to respiratory compromise."""
 
 # =============================================================================
 # Assessment Labels
@@ -240,9 +252,9 @@ CONDITIONAL_REBUTTALS = [
 Rebuttal points:
 1. No CMS, ICD-10-CM, or Coding Clinic requirement mandates multiple sequential SpO2 readings for acute hypoxemic respiratory failure.
 2. Consecutive reading requirements are proprietary payor criteria -- not nationally recognized standards.
-3. A single documented SpO2 <91% on room air with clinical context and treatment response supports the diagnosis.
+3. A documented SpO2 below 91% on room air with clinical context and treatment response supports the diagnosis.
 
-Cite ALL relevant timestamped low SpO2 readings, even if not consecutive.""",
+Cite ALL relevant timestamped low SpO2 readings below 91%, even if not consecutive.""",
     },
     {
         "name": "Persistent/Continuous Symptoms Requirement",
@@ -256,16 +268,9 @@ Rebuttal points:
 
 Cite documentation of respiratory distress at presentation and interventions required.""",
     },
-    {
-        "name": "Proprietary Clinical Criteria (General)",
-        "trigger": "Apply if the denial imposes clinical thresholds beyond provider documentation and nationally recognized standards.",
-        "text": """Apply if the denial imposes clinical thresholds beyond provider documentation and nationally recognized standards.
-
-Rebuttal points:
-1. DRG validation confirms clinical support for documented diagnoses -- it does not substitute proprietary payor thresholds for physician judgment.
-2. Per CMS/AHIMA/Coding Clinic, a diagnosis is reportable when (a) documented by the provider and (b) clinically supported by patient-specific indicators and treatment.
-3. Internal payor criteria exceeding CMS standards are not valid grounds for DRG reassignment.""",
-    },
+    # NOTE: "Proprietary Clinical Criteria (General)" rebuttal was removed per SME feedback (2026-02-23).
+    # SME noted: "unfortunately they can have whatever criteria they want" — payors are allowed
+    # to use their own clinical criteria, so arguing against proprietary criteria is not effective.
 ]
 
 # =============================================================================

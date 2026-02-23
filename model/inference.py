@@ -248,6 +248,8 @@ def load_case_data():
                     "organs_scored": row["organs_scored"],
                     "organ_scores": json.loads(row["organ_scores"]) if row["organ_scores"] else {},
                     "vasopressor_detail": json.loads(row["vasopressor_detail"]) if row["vasopressor_detail"] else [],
+                    "window_start": row["window_start"] if "window_start" in row.asDict() else None,
+                    "window_end": row["window_end"] if "window_end" in row.asDict() else None,
                 }
                 print(f"  Scores total: {case_data['clinical_scores']['total_score']} ({case_data['clinical_scores']['organs_scored']} organs)")
             else:
@@ -364,6 +366,19 @@ Payor: {payor}
 4. INCLUDE TIMESTAMPS with every clinical value cited
 {scoring_instructions}
 6. Follow the Mercy Hospital template structure exactly
+
+# DATA SOURCE RULES (MANDATORY)
+These rules govern which data sources to trust when writing the letter.
+
+NOTE PRIORITY: When evidence appears in multiple note types, weight them in this order:
+1. Discharge Summary  2. H&P  3. Progress Notes  4. Consult  5. ED Provider Note  6. Query  7. ED Notes  8. Nursing Note  9. All other note types (equal weight, lesser than above)
+
+STRUCTURED DATA PRIMACY: For lab values and vital signs, ALWAYS use the values and timestamps from the Structured Data Summary (labs, vitals flowsheet) as the source of truth. Do NOT use lab/vital values or timestamps extracted from narrative physician notes when the same measurement exists in structured data. Physician notes may document approximate or recalled values — the lab system and vitals flowsheet are authoritative.
+
+OMIT NORMAL VALUES: Do NOT cite lab values that fall within normal reference ranges as evidence of organ dysfunction. Normal values weaken the appeal. If a value is normal, omit it entirely — do not mention it. Examples: Lactic acid < 2.0 mmol/L, Platelet count 140-350 K/uL, Creatinine < 1.2 mg/dL.
+
+USE WORST VALUES: Always cite the most severe/worst value within the appropriate clinical time window. Do not cite a lesser value when a more severe one exists in the data.
+
 {conditional_rebuttals_section}
 
 # LANGUAGE RULES (MANDATORY)
@@ -393,6 +408,8 @@ RULES:
 EVIDENCE DENSITY: Every paragraph in the clinical argument must contain at least one specific clinical value with its timestamp.
 
 # SOURCE FIDELITY
+# TODO: SME feedback — consider replacing "Propel" with "consensus-based guidelines" in letter text.
+# Propel is hospital-facing; payors do not adhere to it. Deferred pending team decision.
 The ONLY authoritative source for clinical definitions, diagnostic criteria, and approved references is the PROPEL CRITERIA section above. You may cite references from the Propel document's reference list. DO NOT list or comment on the payor's cited references unless directly refuting a specific clinical claim.
 
 # FORMATTING REQUIREMENTS
