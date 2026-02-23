@@ -105,6 +105,7 @@ try:
     gold_letters_df = spark.sql(f"""
         SELECT letter_id, source_file, payor, denial_text, rebuttal_text, denial_embedding, metadata
         FROM {GOLD_LETTERS_TABLE}
+        WHERE condition_name = '{profile.CONDITION_NAME}'
     """)
     gold_letters = gold_letters_df.collect()
 

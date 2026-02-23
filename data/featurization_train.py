@@ -149,7 +149,7 @@ def checkpoint_gold_letters():
     """CHECKPOINT: Validate gold letters table after ingestion."""
     return checkpoint_table(
         GOLD_LETTERS_TABLE,
-        expected_columns=["letter_id", "source_file", "payor", "denial_text", "rebuttal_text", "denial_embedding"],
+        expected_columns=["letter_id", "condition_name", "source_file", "payor", "denial_text", "rebuttal_text", "denial_embedding"],
         min_rows=1
     )
 
@@ -374,6 +374,7 @@ print("Parser functions loaded")
 create_gold_table_sql = f"""
 CREATE TABLE IF NOT EXISTS {GOLD_LETTERS_TABLE} (
     letter_id STRING NOT NULL,
+    condition_name STRING NOT NULL,
     source_file STRING NOT NULL,
     payor STRING,
     denial_text STRING,
@@ -436,6 +437,7 @@ if RUN_GOLD_INGESTION:
 
             record = {
                 "letter_id": str(uuid.uuid4()),
+                "condition_name": profile.CONDITION_NAME,
                 "source_file": pdf_file,
                 "payor": parsed["payor"],
                 "denial_text": parsed["denial_text"],
@@ -459,6 +461,7 @@ if RUN_GOLD_INGESTION:
     if gold_records:
         schema = StructType([
             StructField("letter_id", StringType(), False),
+            StructField("condition_name", StringType(), False),
             StructField("source_file", StringType(), False),
             StructField("payor", StringType(), True),
             StructField("denial_text", StringType(), True),
@@ -469,8 +472,11 @@ if RUN_GOLD_INGESTION:
         ])
 
         gold_df = spark.createDataFrame(gold_records, schema)
-        gold_df.write.format("delta").mode("overwrite").saveAsTable(GOLD_LETTERS_TABLE)
-        print(f"Wrote {len(gold_records)} records to {GOLD_LETTERS_TABLE}")
+        # Delete existing letters for this condition only, then append new ones
+        spark.sql(f"DELETE FROM {GOLD_LETTERS_TABLE} WHERE condition_name = '{profile.CONDITION_NAME}'")
+        print(f"  Cleared existing {profile.CONDITION_NAME} letters from {GOLD_LETTERS_TABLE}")
+        gold_df.write.format("delta").mode("append").saveAsTable(GOLD_LETTERS_TABLE)
+        print(f"Wrote {len(gold_records)} {profile.CONDITION_NAME} records to {GOLD_LETTERS_TABLE}")
 
     count = spark.sql(f"SELECT COUNT(*) as cnt FROM {GOLD_LETTERS_TABLE}").collect()[0]["cnt"]
     print(f"Total records in gold letters table: {count}")
@@ -587,7 +593,12 @@ if RUN_PROPEL_INGESTION:
 
         if propel_records:
             propel_df = spark.createDataFrame(propel_records)
-            propel_df.write.format("delta").mode("overwrite").saveAsTable(PROPEL_DATA_TABLE)
+            # Delete existing propel data for this condition only, then append new
+            condition_names = set(r["condition_name"] for r in propel_records)
+            for cond in condition_names:
+                spark.sql(f"DELETE FROM {PROPEL_DATA_TABLE} WHERE condition_name = '{cond}'")
+            print(f"  Cleared existing propel data for: {', '.join(condition_names)}")
+            propel_df.write.format("delta").mode("append").saveAsTable(PROPEL_DATA_TABLE)
             print(f"\nWrote {len(propel_records)} records to {PROPEL_DATA_TABLE}")
 
         count = spark.sql(f"SELECT COUNT(*) as cnt FROM {PROPEL_DATA_TABLE}").collect()[0]["cnt"]

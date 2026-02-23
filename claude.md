@@ -144,8 +144,8 @@ The denial table now uses `is_condition_match` (boolean) and `condition_name` (s
 
 | Table | Purpose |
 |-------|---------|
-| `fudgesicle_gold_letters` | Past winning appeals with denial embeddings |
-| `fudgesicle_propel_data` | Official clinical criteria (definition_summary for prompts) |
+| `fudgesicle_gold_letters` | Past winning appeals with denial embeddings, partitioned by `condition_name` |
+| `fudgesicle_propel_data` | Official clinical criteria (definition_summary for prompts), partitioned by `condition_name` |
 
 ### Case Data (populated by featurization_inference.py, read by inference.py)
 

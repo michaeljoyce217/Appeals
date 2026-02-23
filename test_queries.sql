@@ -120,8 +120,9 @@ WHERE denial_embedding IS NOT NULL;
 -- GOLD LETTERS TABLE VALIDATION (fudgesicle_gold_letters)
 -- =============================================================================
 
--- 6. Check gold letters loaded correctly
+-- 6. Check gold letters loaded correctly (by condition)
 SELECT
+    condition_name,
     source_file,
     payor,
     LENGTH(rebuttal_text) as rebuttal_chars,
@@ -129,10 +130,12 @@ SELECT
     metadata['denial_start_page'] as denial_start_page,
     metadata['total_pages'] as total_pages,
     SIZE(denial_embedding) as embedding_dims
-FROM dev.fin_ds.fudgesicle_gold_letters;
+FROM dev.fin_ds.fudgesicle_gold_letters
+ORDER BY condition_name, source_file;
 
 -- 7. Preview gold letter text (appeal vs denial split)
 SELECT
+    condition_name,
     source_file,
     LEFT(rebuttal_text, 200) as rebuttal_preview,
     LEFT(denial_text, 200) as denial_preview
@@ -141,6 +144,7 @@ LIMIT 3;
 
 -- 8. Verify gold letter embeddings
 SELECT
+    condition_name,
     source_file,
     denial_embedding[0] as first_val,
     denial_embedding[1535] as last_val
@@ -151,7 +155,13 @@ FROM dev.fin_ds.fudgesicle_gold_letters;
 -- CROSS-TABLE CHECKS
 -- =============================================================================
 
--- 9. Compare payor distribution
+-- 9. Gold letters per condition
+SELECT condition_name, COUNT(*) as letter_count
+FROM dev.fin_ds.fudgesicle_gold_letters
+GROUP BY condition_name
+ORDER BY condition_name;
+
+-- 10. Compare payor distribution
 SELECT 'inference' as source, payor, COUNT(*) as count
 FROM dev.fin_ds.fudgesicle_inference
 GROUP BY payor
@@ -161,7 +171,7 @@ FROM dev.fin_ds.fudgesicle_gold_letters
 GROUP BY payor
 ORDER BY source, count DESC;
 
--- 10. Total record counts
+-- 11. Total record counts
 SELECT
     (SELECT COUNT(*) FROM dev.fin_ds.fudgesicle_gold_letters) as gold_letters,
     (SELECT COUNT(*) FROM dev.fin_ds.fudgesicle_inference) as inference_rows;
