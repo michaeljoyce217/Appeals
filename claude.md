@@ -113,7 +113,7 @@ profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
 | **Numeric Cross-Check** | `PARAM_TO_CATEGORY`, `LAB_VITAL_MATCHERS` |
 | **Writer Prompt** | `WRITER_SCORING_INSTRUCTIONS` |
 | **Assessment** | `ASSESSMENT_CONDITION_LABEL`, `ASSESSMENT_CRITERIA_LABEL` |
-| **Clinical Scorer** (optional) | `calculate_clinical_scores()`, `write_clinical_scores_table()` |
+| **Clinical Scorer** (optional) | `calculate_clinical_scores()`, `write_clinical_scores_table()`, `POA_DIAGNOSIS_FILTER` |
 | **DOCX Rendering** (optional) | `format_scores_for_prompt()`, `render_scores_in_docx()`, `render_scores_status_note()` |
 | **Conditional Rebuttals** (optional) | `CONDITIONAL_REBUTTALS` (list of rebuttal dicts) |
 
@@ -154,7 +154,7 @@ The denial table now uses `is_condition_match` (boolean) and `condition_name` (s
 | `fudgesicle_case_denial` | Denial text, embedding, payor, DRGs, is_condition_match flag, condition_name |
 | `fudgesicle_case_clinical` | Patient info + extracted clinical notes (JSON) |
 | `fudgesicle_case_structured_summary` | LLM summary of structured data |
-| `fudgesicle_case_sofa_scores` | Programmatic SOFA scores per organ system (JSON), total score, vasopressor detail |
+| `fudgesicle_case_sofa_scores` | Programmatic SOFA scores per organ system (JSON), total score, vasopressor detail, window mode |
 | `fudgesicle_case_conflicts` | Detected conflicts + recommendation (includes numeric mismatches) |
 
 ### Intermediate Data (populated by featurization_inference.py)
@@ -164,7 +164,7 @@ The denial table now uses `is_condition_match` (boolean) and `condition_name` (s
 | `fudgesicle_labs` | Lab results with timestamps |
 | `fudgesicle_vitals` | Vital signs with timestamps |
 | `fudgesicle_meds` | Medication administrations |
-| `fudgesicle_diagnoses` | DX records with timestamps |
+| `fudgesicle_diagnoses` | DX records with timestamps and POA status (FINAL_DX_POA_C) |
 | `fudgesicle_structured_timeline` | Merged chronological timeline |
 
 Note: All tables use the `{trgt_cat}.fin_ds.` prefix (e.g., `dev.fin_ds.fudgesicle_*`).
@@ -183,6 +183,19 @@ Progress Notes, Consults, H&P, Discharge Summary, ED Notes, Initial Assessments,
 
 **Note:** ALL notes from the encounter are retrieved (not just most recent), concatenated chronologically with timestamps.
 
+### Note Priority Hierarchy
+When assembling notes for the LLM prompt, notes are sorted by SME-specified priority so the LLM naturally weights higher-priority notes more heavily:
+
+1. Discharge Summary
+2. H&P Note
+3. Progress Note
+4. Consult Note
+5. ED Provider Note
+6. Query
+7. ED Notes
+8. Nursing Note
+9. All other note types (alphabetical)
+
 ### Programmatic SOFA Scoring
 SOFA scores are calculated deterministically from raw structured data (zero LLM calls). The calculator reads directly from `fudgesicle_labs`, `fudgesicle_vitals`, and `fudgesicle_meds` tables, applies standard SOFA thresholds, and outputs per-organ scores with source values and timestamps:
 - **Respiration:** PaO2/FiO2 ratio (closest-in-time pairing)
@@ -191,6 +204,13 @@ SOFA scores are calculated deterministically from raw structured data (zero LLM 
 - **Cardiovascular:** MAP + vasopressor-based scoring (dopamine, dobutamine, epinephrine, norepinephrine dose thresholds)
 - **CNS:** GCS (Glasgow Coma Scale) — uses FLO_MEAS_ID '1525'
 - **Renal:** Worst creatinine
+
+**POA-Based Window Anchoring:** The 24-hour scoring window is determined by Present on Admission (POA) status from `FINAL_DX_POA_C`:
+- **POA = Y (code 1):** Fixed 24h window anchored to admission datetime
+- **POA = N (code 2):** Fixed 24h window anchored to first sepsis documentation timestamp
+- **No POA data:** Fallback to sliding window that maximizes total SOFA score (original behavior)
+
+The window mode (`poa_anchored_admission`, `poa_anchored_first_dx`, or `sliding_best_score`) is persisted to the scores table, displayed in DOCX output, and included in the LLM prompt context. The condition profile provides `POA_DIAGNOSIS_FILTER` to specify which ICD codes to check for POA status.
 
 When SOFA total >= 2, a formatted table is appended after the letter body (rendered programmatically in DOCX, not by the LLM). The LLM references the scores narratively but does not include a table in the letter text. When the SOFA table is omitted (score < 2 or insufficient data), the internal review section explains why.
 
@@ -402,7 +422,6 @@ The following feedback items from SME review require external decisions or data 
 | 2 | Critical care charges — verify CPT 99291 before citing | Need charge data access | Deferred |
 | 3 | ARF respiratory rate threshold — >20 (Propel/ACDIS) vs >30 (Mercy Q-tip) | Needs internal consensus | Blocked |
 | 4 | ARF case pre-screening — only appeal cases matching WON patterns | Needs outcome data + screening logic | Deferred |
-| 5 | Propel terminology — replace "Propel criteria" with "consensus-based guidelines" in letter text | Pending team decision | TODO |
 
 ## Team
 
