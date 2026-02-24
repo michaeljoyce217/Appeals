@@ -69,7 +69,7 @@ When insurance payors deny or downgrade DRG claims, this system generates profes
 
 | Condition | DRG Codes | Clinical Scoring | Conditional Rebuttals |
 |-----------|-----------|-----------------|----------------------|
-| **Sepsis** | 870, 871, 872 | SOFA (6 organs, deterministic) | None |
+| **Sepsis** | 870, 871, 872 | SOFA (6 organs, deterministic, POA-anchored windows) | None |
 | **Acute Respiratory Failure** | 189, 190, 191, 207, 208 | None | 3 physician-authored rebuttals |
 
 ### Respiratory Failure — Conditional Rebuttals
@@ -93,7 +93,9 @@ The engine reads the denial, decides which rebuttals apply, and weaves them into
 | **Source Fidelity** | Letters only cite Propel-approved references — never list or validate the payor's cited sources |
 | **Single-Letter Processing** | One denial at a time — no batch processing, no memory issues |
 | **Evidence Hierarchy** | Physician notes (primary) + structured data (supporting) for comprehensive evidence |
+| **Note Priority Hierarchy** | Clinical notes ordered by SME-specified priority (Discharge Summary > H&P > Progress Notes > ...) so the LLM naturally weights higher-priority notes more heavily |
 | **Programmatic Clinical Scoring** | Deterministic scoring from raw data (e.g., SOFA for sepsis) — zero LLM calls |
+| **POA-Based SOFA Windows** | SOFA scoring window anchored by Present on Admission status: POA Y = 24h from admission, POA N = 24h from first sepsis dx, unknown = sliding window |
 | **Numeric Cross-Check** | LLM-extracted numeric claims validated against closest-in-time raw values |
 | **Conflict Detection** | Flags discrepancies between notes and structured data for CDI review |
 | **5-Dimension Assessment** | Source fidelity, Propel criteria, argument structure, evidence quality, formatting compliance |
@@ -130,7 +132,7 @@ profile = importlib.import_module(f"condition_profiles.{CONDITION_PROFILE}")
 | **Numeric Cross-Check** | `PARAM_TO_CATEGORY`, `LAB_VITAL_MATCHERS` |
 | **Writer Prompt** | `WRITER_SCORING_INSTRUCTIONS` |
 | **Assessment** | `ASSESSMENT_CONDITION_LABEL`, `ASSESSMENT_CRITERIA_LABEL` |
-| **Clinical Scorer** (optional) | `calculate_clinical_scores()`, `write_clinical_scores_table()` |
+| **Clinical Scorer** (optional) | `calculate_clinical_scores()`, `write_clinical_scores_table()`, `POA_DIAGNOSIS_FILTER` |
 | **DOCX Rendering** (optional) | `format_scores_for_prompt()`, `render_scores_in_docx()`, `render_scores_status_note()` |
 | **Conditional Rebuttals** (optional) | `CONDITIONAL_REBUTTALS` (list of rebuttal dicts) |
 
@@ -202,7 +204,7 @@ SEPSIS/
 | `fudgesicle_case_denial` | Denial text, embedding, payor, DRGs, is_condition_match flag, condition_name |
 | `fudgesicle_case_clinical` | Patient info + extracted clinical notes (JSON) |
 | `fudgesicle_case_structured_summary` | LLM summary of structured data |
-| `fudgesicle_case_sofa_scores` | Programmatic clinical scores per organ system (JSON), total score |
+| `fudgesicle_case_sofa_scores` | Programmatic clinical scores per organ system (JSON), total score, window mode |
 | `fudgesicle_case_conflicts` | Detected conflicts + recommendation (includes numeric mismatches) |
 
 ### Intermediate Data (populated by featurization_inference.py)
@@ -212,7 +214,7 @@ SEPSIS/
 | `fudgesicle_labs` | Lab results with timestamps |
 | `fudgesicle_vitals` | Vital signs with timestamps |
 | `fudgesicle_meds` | Medication administrations |
-| `fudgesicle_diagnoses` | DX records with timestamps |
+| `fudgesicle_diagnoses` | DX records with timestamps and POA status |
 | `fudgesicle_structured_timeline` | Merged chronological timeline |
 
 All tables use the `{trgt_cat}.fin_ds.` prefix (e.g., `dev.fin_ds.fudgesicle_*`).

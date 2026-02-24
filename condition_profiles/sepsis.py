@@ -48,6 +48,9 @@ DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/go
 # Clinical scores table suffix (base engine prepends catalog + schema)
 CLINICAL_SCORES_TABLE_NAME = "fudgesicle_case_sofa_scores"
 
+# POA diagnosis filter — used by featurization_inference.py to find POA status for this condition
+POA_DIAGNOSIS_FILTER = "(ICD10_CODE LIKE 'R65.2%' OR LOWER(DX_NAME) LIKE '%sepsis%')"
+
 # =============================================================================
 # Denial Parser
 # =============================================================================
@@ -294,13 +297,15 @@ def score_organ(organ, value):
     return 0
 
 
-def calculate_clinical_scores(account_id, spark, tables):
+def calculate_clinical_scores(account_id, spark, tables,
+                              admission_dt=None, poa_code=None, first_dx_timestamp=None):
     """
-    Calculate SOFA scores from raw structured data tables using a 24-hour sliding window.
+    Calculate SOFA scores from raw structured data tables using a 24-hour window.
 
-    Collects all timestamped lab/vital/med values, then finds the 24-hour window
-    that produces the highest total SOFA score. This ensures all component values
-    used in the final score fall within a clinically valid 24-hour period.
+    Window selection follows POA-based anchoring per SME feedback:
+    - POA code 1 (present on admission): fixed 24h window from admission datetime
+    - POA code 2 (not present on admission): fixed 24h window from first sepsis documentation
+    - No POA data / other codes: sliding window that maximizes total SOFA score
 
     Zero LLM calls — purely deterministic.
 
@@ -308,14 +313,17 @@ def calculate_clinical_scores(account_id, spark, tables):
         account_id: The hospital account ID
         spark: SparkSession instance
         tables: dict with keys "labs", "vitals", "meds" -> full table names
+        admission_dt: Admission datetime (for POA-anchored window)
+        poa_code: POA indicator (1=Y, 2=N, None=unknown)
+        first_dx_timestamp: Timestamp of first sepsis diagnosis (for POA N anchoring)
 
     Returns:
         dict with organ_scores, total_score, organs_scored, vasopressor_detail,
-        window_start, window_end
+        window_start, window_end, window_mode
     """
     from datetime import timedelta
 
-    print("  Calculating SOFA scores (24h sliding window)...")
+    print("  Calculating SOFA scores (24h window)...")
 
     labs_table = tables["labs"]
     vitals_table = tables["vitals"]
@@ -477,33 +485,27 @@ def calculate_clinical_scores(account_id, spark, tables):
             "vasopressor_detail": [],
             "window_start": None,
             "window_end": None,
+            "window_mode": "sliding_best_score",
         }
 
-    # ---- Sliding window: find the 24h window with highest total SOFA ----
-    # Candidate windows are anchored at each unique measurement timestamp
+    # ---- Determine window mode based on POA status ----
     all_timestamps = sorted(set(all_timestamps))
-    best_window = None
-    best_total = -1
-    best_organs = None
-    best_vasopressor_detail = None
 
-    for anchor_ts in all_timestamps:
-        window_end = anchor_ts + timedelta(hours=24)
-
-        # Score each organ using the WORST value within this window
-        window_organs = {}
+    # Helper: score a single 24h window
+    def _score_window(w_start, w_end):
+        """Score all organs within a fixed [w_start, w_end] window. Returns (organs, total, vasopressor_detail)."""
+        w_organs = {}
 
         for organ_key, candidates in organ_candidates.items():
             if organ_key == "cardiovascular":
-                # Handle cardiovascular separately (MAP + vasopressor override)
                 continue
             best_in_window = None
             for val, ts, score, display in candidates:
-                if anchor_ts <= ts <= window_end:
+                if w_start <= ts <= w_end:
                     if best_in_window is None or score > best_in_window[2]:
                         best_in_window = (val, ts, score, display)
             if best_in_window:
-                window_organs[organ_key] = {
+                w_organs[organ_key] = {
                     "score": best_in_window[2],
                     "value": best_in_window[3],
                     "timestamp": str(best_in_window[1]),
@@ -516,32 +518,32 @@ def calculate_clinical_scores(account_id, spark, tables):
         best_cv_ts = None
 
         for val, ts, score, display in map_candidates:
-            if anchor_ts <= ts <= window_end:
+            if w_start <= ts <= w_end:
                 if score > best_cv_score:
                     best_cv_score = score
                     best_cv_value = display
                     best_cv_ts = ts
 
-        window_vasopressor_detail = []
-        window_vasopressors = {}
+        w_vasopressor_detail = []
+        w_vasopressors = {}
         for entry in vasopressor_entries:
             ts = entry["timestamp"]
-            if anchor_ts <= ts <= window_end:
-                window_vasopressor_detail.append({
+            if w_start <= ts <= w_end:
+                w_vasopressor_detail.append({
                     "drug": entry["drug"],
                     "dose": entry["dose"],
                     "timestamp": str(ts),
                 })
                 drug = entry["drug"]
                 dose = entry["dose"]
-                if drug not in window_vasopressors:
-                    window_vasopressors[drug] = (dose, ts)
+                if drug not in w_vasopressors:
+                    w_vasopressors[drug] = (dose, ts)
                 elif dose is not None:
-                    existing_dose = window_vasopressors[drug][0]
+                    existing_dose = w_vasopressors[drug][0]
                     if existing_dose is None or dose > existing_dose:
-                        window_vasopressors[drug] = (dose, ts)
+                        w_vasopressors[drug] = (dose, ts)
 
-        for drug, (dose, ts) in window_vasopressors.items():
+        for drug, (dose, ts) in w_vasopressors.items():
             cv_score = 2
             if drug == "dopamine" and dose is not None:
                 if dose > 15:
@@ -567,20 +569,57 @@ def calculate_clinical_scores(account_id, spark, tables):
                 best_cv_ts = ts
 
         if best_cv_score > 0 or best_cv_ts is not None:
-            window_organs["cardiovascular"] = {
+            w_organs["cardiovascular"] = {
                 "score": best_cv_score,
                 "value": best_cv_value,
                 "timestamp": str(best_cv_ts) if best_cv_ts else None,
             }
 
-        # Calculate total for this window
-        window_total = sum(o["score"] for o in window_organs.values())
+        w_total = sum(o["score"] for o in w_organs.values())
+        return w_organs, w_total, w_vasopressor_detail
 
-        if window_total > best_total:
-            best_total = window_total
-            best_organs = window_organs
-            best_window = (anchor_ts, window_end)
-            best_vasopressor_detail = window_vasopressor_detail
+    # Determine anchor based on POA code
+    window_mode = "sliding_best_score"
+    anchor_point = None
+
+    if poa_code is not None and poa_code not in (1, 2):
+        print(f"    Warning: Unexpected POA_CODE value: {poa_code} (type: {type(poa_code).__name__}) — falling back to sliding window")
+
+    if poa_code == 1 and admission_dt is not None:
+        # POA Y: anchor to admission datetime
+        window_mode = "poa_anchored_admission"
+        anchor_point = admission_dt
+    elif poa_code == 2 and first_dx_timestamp is not None:
+        # POA N: anchor to first sepsis documentation
+        window_mode = "poa_anchored_first_dx"
+        anchor_point = first_dx_timestamp
+
+    if anchor_point is not None:
+        # Fixed POA-anchored window
+        fixed_start = anchor_point
+        fixed_end = anchor_point + timedelta(hours=24)
+        best_organs, best_total, best_vasopressor_detail = _score_window(fixed_start, fixed_end)
+        best_window = (fixed_start, fixed_end)
+        anchor_label = "admission" if window_mode == "poa_anchored_admission" else "first sepsis dx"
+        print(f"    SOFA window: POA-anchored to {anchor_label} ({str(fixed_start)[:19]} — {str(fixed_end)[:19]})")
+    else:
+        # Sliding window: find the 24h window with highest total SOFA
+        best_window = None
+        best_total = -1
+        best_organs = None
+        best_vasopressor_detail = None
+
+        for anchor_ts in all_timestamps:
+            w_end = anchor_ts + timedelta(hours=24)
+            w_organs, w_total, w_vaso = _score_window(anchor_ts, w_end)
+
+            if w_total > best_total:
+                best_total = w_total
+                best_organs = w_organs
+                best_window = (anchor_ts, w_end)
+                best_vasopressor_detail = w_vaso
+
+        print(f"    SOFA window: Sliding (best 24h window maximizing total score)")
 
     # ---- Output ----
     organs_scored = len(best_organs) if best_organs else 0
@@ -601,6 +640,7 @@ def calculate_clinical_scores(account_id, spark, tables):
         "vasopressor_detail": best_vasopressor_detail or [],
         "window_start": window_start_str,
         "window_end": window_end_str,
+        "window_mode": window_mode,
     }
 
 
@@ -619,6 +659,7 @@ def write_clinical_scores_table(account_id, scores_result, spark, table_name):
         vasopressor_detail STRING,
         window_start STRING,
         window_end STRING,
+        window_mode STRING,
         created_at TIMESTAMP
     ) USING DELTA
     """)
@@ -631,6 +672,7 @@ def write_clinical_scores_table(account_id, scores_result, spark, table_name):
         "vasopressor_detail": json.dumps(scores_result.get("vasopressor_detail", [])),
         "window_start": scores_result.get("window_start"),
         "window_end": scores_result.get("window_end"),
+        "window_mode": scores_result.get("window_mode", "sliding_best_score"),
         "created_at": datetime.now()
     }]
 
@@ -642,6 +684,7 @@ def write_clinical_scores_table(account_id, scores_result, spark, table_name):
         StructField("vasopressor_detail", StringType(), True),
         StructField("window_start", StringType(), True),
         StructField("window_end", StringType(), True),
+        StructField("window_mode", StringType(), True),
         StructField("created_at", TimestampType(), True)
     ])
 
@@ -653,6 +696,15 @@ def write_clinical_scores_table(account_id, scores_result, spark, table_name):
 # =============================================================================
 # DOCX Rendering — SOFA Scores
 # =============================================================================
+
+def _window_mode_label(window_mode):
+    """Return human-readable label for SOFA window mode."""
+    if window_mode == "poa_anchored_admission":
+        return "POA-anchored to admission"
+    elif window_mode == "poa_anchored_first_dx":
+        return "POA-anchored to first sepsis dx"
+    return "best 24h window"
+
 
 ORGAN_DISPLAY_NAMES = {
     "respiratory": "Respiratory (PaO2/FiO2)",
@@ -717,9 +769,10 @@ def format_scores_for_prompt(scores_data):
 
     lines = []
     lines.append("SOFA SCORES (calculated from raw clinical data):")
-    # Include the 24-hour window if available
+    # Include the 24-hour window with mode label
     if scores_data.get("window_start") and scores_data.get("window_end"):
-        lines.append(f"24-hour scoring window: {scores_data['window_start']} to {scores_data['window_end']}")
+        mode_label = _window_mode_label(scores_data.get("window_mode", "sliding_best_score"))
+        lines.append(f"24-hour scoring window ({mode_label}): {scores_data['window_start']} to {scores_data['window_end']}")
     lines.append("")
     lines.append("| Organ System | Score | Value | Criteria |")
     lines.append("|---|---|---|---|")
@@ -768,10 +821,11 @@ def render_scores_in_docx(doc, scores_data):
     sofa_header.add_run("Appendix: SOFA Score Summary").bold = True
     sofa_header.paragraph_format.space_after = Pt(4)
 
-    # Show the 24-hour scoring window if available
+    # Show the 24-hour scoring window with mode label
     if scores_data.get("window_start") and scores_data.get("window_end"):
+        mode_label = _window_mode_label(scores_data.get("window_mode", "sliding_best_score"))
         window_note = doc.add_paragraph()
-        window_note.add_run("Scoring Window: ").bold = True
+        window_note.add_run(f"Scoring Window ({mode_label}): ").bold = True
         window_note.add_run(f"{scores_data['window_start']} to {scores_data['window_end']}")
         window_note.paragraph_format.space_after = Pt(4)
 
