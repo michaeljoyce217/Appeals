@@ -686,7 +686,8 @@ def query_diagnoses(account_id):
            edg.DX_NAME,
            dd.ICD10_CODE,
            CAST(pe.CONTACT_DATE AS TIMESTAMP) AS EVENT_TIMESTAMP,
-           'OUTPATIENT_ENC_DX' AS source
+           'OUTPATIENT_ENC_DX' AS source,
+           NULL AS POA_CODE
     FROM target_encounter te
     JOIN prod.clarity_cur.pat_enc_dx_enh dd ON dd.PAT_ENC_CSN_ID = te.PAT_ENC_CSN_ID
     JOIN prod.clarity_cur.pat_enc_enh pe ON pe.PAT_ENC_CSN_ID = dd.PAT_ENC_CSN_ID
@@ -699,7 +700,8 @@ def query_diagnoses(account_id):
            edg.DX_NAME,
            dx.CODE AS ICD10_CODE,
            CAST(ha.DISCH_DATE_TIME AS TIMESTAMP) AS EVENT_TIMESTAMP,
-           'INPATIENT_ACCT_DX' AS source
+           'INPATIENT_ACCT_DX' AS source,
+           dx.FINAL_DX_POA_C AS POA_CODE
     FROM target_encounter te
     JOIN prod.clarity_cur.hsp_acct_dx_list_enh dx ON dx.PAT_ID = te.PAT_ID
     JOIN prod.clarity_cur.pat_enc_hsp_har_enh ha ON ha.HSP_ACCOUNT_ID = dx.HSP_ACCOUNT_ID
@@ -712,7 +714,8 @@ def query_diagnoses(account_id):
            phx.HX_PROBLEM_DX_NAME AS DX_NAME,
            phx.HX_PROBLEM_ICD10_CODE AS ICD10_CODE,
            CAST(phx.HX_DATE_OF_ENTRY AS TIMESTAMP) AS EVENT_TIMESTAMP,
-           'PROBLEM_LIST' AS source
+           'PROBLEM_LIST' AS source,
+           NULL AS POA_CODE
     FROM target_encounter te
     JOIN prod.clarity_cur.problem_list_hx_enh phx ON phx.PAT_ID = te.PAT_ID
     WHERE phx.HX_PROBLEM_ID IS NOT NULL AND phx.HX_STATUS = 'Active'
@@ -721,7 +724,7 @@ def query_diagnoses(account_id):
     spark.sql(f"""
     CREATE OR REPLACE TABLE {DIAGNOSIS_TABLE} AS
     SELECT DISTINCT HSP_ACCOUNT_ID, PAT_ENC_CSN_ID, DX_ID, DX_NAME, ICD10_CODE,
-           EVENT_TIMESTAMP, source
+           EVENT_TIMESTAMP, source, POA_CODE
     FROM encounter_diagnoses
     WHERE DX_NAME IS NOT NULL OR ICD10_CODE IS NOT NULL
     ORDER BY EVENT_TIMESTAMP ASC
@@ -1333,9 +1336,30 @@ else:
             # -------------------------------------------------------------------------
             print(f"\nStep 5.5: Calculating clinical scores ({profile.CONDITION_DISPLAY_NAME})...")
             if hasattr(profile, 'calculate_clinical_scores'):
+                # Get admission datetime for POA-based SOFA window anchoring
+                adm_row = spark.sql("SELECT ENCOUNTER_START FROM target_encounter LIMIT 1").collect()
+                admission_dt = adm_row[0]["ENCOUNTER_START"] if adm_row else None
+
+                # Get POA status for condition-relevant diagnoses (filter from profile)
+                poa_filter = getattr(profile, 'POA_DIAGNOSIS_FILTER', None)
+                poa_code = None
+                first_dx_timestamp = None
+                if poa_filter:
+                    poa_row = spark.sql(f"""
+                        SELECT POA_CODE, EVENT_TIMESTAMP
+                        FROM {DIAGNOSIS_TABLE}
+                        WHERE source = 'INPATIENT_ACCT_DX'
+                          AND POA_CODE IS NOT NULL
+                          AND {poa_filter}
+                        ORDER BY EVENT_TIMESTAMP ASC
+                        LIMIT 1
+                    """).collect()
+                    poa_code = poa_row[0]["POA_CODE"] if poa_row else None
+                    first_dx_timestamp = poa_row[0]["EVENT_TIMESTAMP"] if poa_row else None
+
                 scores_result = profile.calculate_clinical_scores(account_id, spark, {
                     "labs": LABS_TABLE, "vitals": VITALS_TABLE, "meds": MEDS_TABLE
-                })
+                }, admission_dt=admission_dt, poa_code=poa_code, first_dx_timestamp=first_dx_timestamp)
             else:
                 scores_result = {"total_score": 0, "organs_scored": 0, "organ_scores": {}}
 

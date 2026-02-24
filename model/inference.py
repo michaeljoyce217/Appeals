@@ -250,6 +250,7 @@ def load_case_data():
                     "vasopressor_detail": json.loads(row["vasopressor_detail"]) if row["vasopressor_detail"] else [],
                     "window_start": row["window_start"] if "window_start" in row.asDict() else None,
                     "window_end": row["window_end"] if "window_end" in row.asDict() else None,
+                    "window_mode": row["window_mode"] if "window_mode" in row.asDict() else "sliding_best_score",
                 }
                 print(f"  Scores total: {case_data['clinical_scores']['total_score']} ({case_data['clinical_scores']['organs_scored']} organs)")
             else:
@@ -411,6 +412,8 @@ EVIDENCE DENSITY: Every paragraph in the clinical argument must contain at least
 # TODO: SME feedback — consider replacing "Propel" with "consensus-based guidelines" in letter text.
 # Propel is hospital-facing; payors do not adhere to it. Deferred pending team decision.
 The ONLY authoritative source for clinical definitions, diagnostic criteria, and approved references is the PROPEL CRITERIA section above. You may cite references from the Propel document's reference list. DO NOT list or comment on the payor's cited references unless directly refuting a specific clinical claim.
+
+IMPORTANT: Do NOT use the word "Propel" anywhere in the letter text. Propel is an internal hospital-facing tool — payors do not recognize it. Instead, reference the clinical criteria by their standard medical names (e.g., "Sepsis-3 consensus criteria," "KDIGO criteria") or simply state the criteria without attributing them to Propel.
 
 # FORMATTING REQUIREMENTS
 - DO NOT include a "Summary Table of Key Clinical Data" or any similar summary table at the end of the letter. All clinical data should be presented within the body of the letter where it is relevant to the argument. Do not repeat it in a table format at the end.
@@ -696,8 +699,27 @@ Return ONLY valid JSON in this format:
         clinical_definition_section = "No specific definition loaded."
 
     # Build clinical notes section dynamically from all available notes
+    # Note priority per SME feedback (lower number = higher priority)
+    NOTE_PRIORITY = {
+        "discharge_summary": 1,
+        "hp_note": 2,
+        "progress_note": 3,
+        "consult_note": 4,
+        "ed_provider_note": 5,
+        "query": 6,
+        "ed_notes": 7,
+        "nursing_note": 8,
+    }
+    DEFAULT_PRIORITY = 9  # All other note types
+
+    # Sort by priority, then alphabetically for ties
+    sorted_notes = sorted(
+        extracted_notes.items(),
+        key=lambda kv: (NOTE_PRIORITY.get(kv[0], DEFAULT_PRIORITY), kv[0])
+    )
+
     clinical_notes_parts = []
-    for note_key, note_content in extracted_notes.items():
+    for note_key, note_content in sorted_notes:
         if note_content and note_content != "Not available":
             display_name = note_key.replace("_", " ").title()
             clinical_notes_parts.append(f"## {display_name}\n{note_content}")
