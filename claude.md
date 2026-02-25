@@ -30,9 +30,12 @@ SEPSIS/
 ├── model/
 │   └── inference.py                  # GENERATION: Vector search, write, assess, export
 ├── utils/
-│   ├── gold_standard_appeals.gold_standard_appeals__sepsis_only/  # Current gold letters + default template
-│   ├── gold_standard_appeals_sepsis_multiple/ # Future use
-│   ├── sample_denial_letters/        # New denial letters to process (PDFs)
+│   ├── gold_standard_appeals/
+│   │   ├── gold_standard_appeals_sepsis_only/   # Sepsis gold letters + default template
+│   │   └── gold_standard_appeals_arf_only/      # ARF gold letters + default template
+│   ├── sample_denial_letters/
+│   │   ├── sample_denial_letter_sepsis/         # Sepsis denial PDFs
+│   │   └── sample_denial_letter_respiratory_failure/  # ARF denial PDFs
 │   ├── propel_data/                  # Clinical criteria definitions (PDFs)
 │   └── outputs/                      # Generated appeal letters (DOCX files)
 ├── docs/
@@ -361,7 +364,7 @@ Note: 47 note types are queried but ~20 typically have content for a given sepsi
 
 1. **Install dependencies** (run Cell 1 alone, then restart):
    ```python
-   %pip install azure-ai-documentintelligence==1.0.2 openai python-docx
+   %pip install azure-ai-documentintelligence==1.0.2 openai python-docx tiktoken
    dbutils.library.restartPython()
    ```
 
@@ -371,9 +374,9 @@ Note: 47 note types are queried but ~20 typically have content for a given sepsi
    RUN_PROPEL_INGESTION = True # First run
    ```
 
-3. **Prepare case data** - In `featurization_inference.py`, set the PDF path:
+3. **Prepare case data** - In `featurization_inference.py`, set the condition profile and place your denial PDF:
    ```python
-   DENIAL_PDF_PATH = "/path/to/denial.pdf"
+   CONDITION_PROFILE = "sepsis"  # Denial PDF auto-resolves to sample_denial_letter_{CONDITION_PROFILE}/
    ```
    Run the notebook to prepare all case data (writes to case tables).
 
