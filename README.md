@@ -182,6 +182,15 @@ SEPSIS/
 │   ├── rebuttal-engine-overview.html       # Technical overview (tabbed, detailed)
 │   ├── appeals-team-overview.html          # Simplified overview for appeals team
 │   └── technical-architecture.html         # Architecture deep-dive
+├── utils/
+│   ├── gold_standard_appeals/
+│   │   ├── gold_standard_appeals_sepsis_only/   # Sepsis gold letters + default template
+│   │   └── gold_standard_appeals_arf_only/      # ARF gold letters + default template
+│   ├── sample_denial_letters/
+│   │   ├── sample_denial_letter_sepsis/         # Sepsis denial PDFs
+│   │   └── sample_denial_letter_respiratory_failure/  # ARF denial PDFs
+│   ├── propel_data/                  # Clinical criteria definitions (PDFs)
+│   └── outputs/                      # Generated appeal letters (DOCX files)
 ├── archive/                          # Older versions, POC code, source materials
 ├── test_queries.sql                  # Validation queries for Unity Catalog
 ├── README.md                         # This file
@@ -224,7 +233,7 @@ All tables use the `{trgt_cat}.fin_ds.` prefix (e.g., `dev.fin_ds.fudgesicle_*`)
 ### 1. Install Dependencies
 Run Cell 1 alone, then restart:
 ```python
-%pip install azure-ai-documentintelligence==1.0.2 openai python-docx
+%pip install azure-ai-documentintelligence==1.0.2 openai python-docx tiktoken
 dbutils.library.restartPython()
 ```
 
@@ -238,10 +247,10 @@ RUN_PROPEL_INGESTION = True
 Run the notebook. This ingests gold standard letters and Propel clinical definitions.
 
 ### 3. Prepare Case Data
-In `featurization_inference.py`, set the denial PDF path:
+In `featurization_inference.py`, set the condition profile and place your denial PDF in the corresponding folder:
 ```python
 CONDITION_PROFILE = "respiratory_failure"  # or "sepsis"
-DENIAL_PDF_PATH = "/path/to/denial_letter.pdf"
+# Denial PDF auto-resolves to sample_denial_letter_{CONDITION_PROFILE}/
 ```
 Run the notebook to parse the denial, extract clinical notes, calculate clinical scores, and write all case data to tables.
 
