@@ -15,7 +15,7 @@
 # Run on Databricks Runtime 15.4 LTS ML
 
 # Uncomment and run ONCE per cluster session:
-# %pip install azure-ai-documentintelligence==1.0.2 openai python-docx
+# %pip install azure-ai-documentintelligence==1.0.2 openai python-docx tiktoken
 # dbutils.library.restartPython()
 
 # =============================================================================
@@ -27,6 +27,7 @@ import json
 import importlib
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import tiktoken
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, ArrayType, FloatType, BooleanType, TimestampType
 
@@ -40,7 +41,7 @@ profile.validate_profile(profile)
 # -----------------------------------------------------------------------------
 # INPUT: Set the denial PDF to process
 # -----------------------------------------------------------------------------
-DENIAL_PDF_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/sample_denial_letters/example_denial.pdf"
+DENIAL_PDF_PATH = f"/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/sample_denial_letters/sample_denial_letter_{CONDITION_PROFILE}/example_denial.pdf"
 
 # If account ID is known (production), set it here. Otherwise LLM will extract from PDF.
 KNOWN_ACCOUNT_ID = None  # e.g., "12345678" or None to extract
@@ -145,11 +146,20 @@ def extract_text_from_pdf(file_path):
 
 
 def generate_embedding(text):
-    """Generate embedding vector for text."""
-    # text-embedding-ada-002 has 8191 token limit (~32k chars). Use 30k for safety buffer.
-    if len(text) > 30000:
-        print(f"  Warning: Text truncated from {len(text)} to 30000 chars for embedding")
-        text = text[:30000]
+    """
+    Generate embedding vector for text using Azure OpenAI.
+    Returns 1536-dimensional vector.
+    """
+    # Use the tokenizer for the specific model.
+    # For text-embedding-ada-002, the encoding is 'cl100k_base'
+    encoding = tiktoken.get_encoding("cl100k_base")
+    MODEL_TOKEN_LIMIT = 8192
+
+    tokens = encoding.encode(text)
+    if len(tokens) > MODEL_TOKEN_LIMIT:
+        print(f"  Warning: Text truncated from {len(tokens)} to {MODEL_TOKEN_LIMIT} tokens for embedding")
+        tokens = tokens[:MODEL_TOKEN_LIMIT]
+        text = encoding.decode(tokens)
 
     response = openai_client.embeddings.create(
         model=EMBEDDING_MODEL,

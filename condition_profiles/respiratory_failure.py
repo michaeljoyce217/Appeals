@@ -40,9 +40,9 @@ CONDITION_NAME = "respiratory_failure"
 CONDITION_DISPLAY_NAME = "Acute Respiratory Failure"
 DRG_CODES = ["189", "190", "191", "207", "208"]
 
-GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals_arf_only"
+GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals/gold_standard_appeals_arf_only"
 PROPEL_DATA_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/propel_data"
-DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals_arf_only/default_respiratory_failure_template.docx"
+DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals/gold_standard_appeals_arf_only/default_respiratory_failure_template.docx"
 
 # No clinical scoring system for ARF (unlike SOFA for sepsis)
 CLINICAL_SCORES_TABLE_NAME = None

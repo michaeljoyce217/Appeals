@@ -41,9 +41,9 @@ CONDITION_NAME = "sepsis"
 CONDITION_DISPLAY_NAME = "Sepsis"
 DRG_CODES = ["870", "871", "872"]
 
-GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals.gold_standard_appeals__sepsis_only"
+GOLD_LETTERS_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals/gold_standard_appeals_sepsis_only"
 PROPEL_DATA_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/propel_data"
-DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals_sepsis_only/default_sepsis_appeal_template.docx"
+DEFAULT_TEMPLATE_PATH = "/Workspace/Repos/mijo8881@mercy.net/fudgesicle/utils/gold_standard_appeals/gold_standard_appeals_sepsis_only/default_sepsis_appeal_template.docx"
 
 # Clinical scores table suffix (base engine prepends catalog + schema)
 CLINICAL_SCORES_TABLE_NAME = "fudgesicle_case_sofa_scores"

@@ -16,7 +16,7 @@
 # After restart, the packages persist for the cluster session.
 #
 # Uncomment and run ONCE per cluster session:
-# %pip install azure-ai-documentintelligence==1.0.2 openai python-docx
+# %pip install azure-ai-documentintelligence==1.0.2 openai python-docx tiktoken
 # dbutils.library.restartPython()
 #
 # After restart completes, run Cell 2 onwards (leave this cell commented)
@@ -29,6 +29,7 @@ import re
 import uuid
 import importlib
 from datetime import datetime
+import tiktoken
 from pyspark.sql import SparkSession
 from pyspark.sql.types import (
     StructType, StructField, StringType, ArrayType, FloatType,
@@ -254,6 +255,7 @@ def identify_denial_start(pages_text):
         ("healthnet", "Health Net"),
         ("medicaid", "Medicaid"),
         ("medicare", "Medicare"),
+        ("essence", "Essence Healthcare"),
     ]
 
     # Patterns for address and date (signs of a formal business letter header)
@@ -326,10 +328,16 @@ def generate_embedding(text):
     Generate embedding vector for text using Azure OpenAI.
     Returns 1536-dimensional vector.
     """
-    # text-embedding-ada-002 has 8191 token limit (~32k chars). Use 30k for safety buffer.
-    if len(text) > 30000:
-        print(f"  Warning: Text truncated from {len(text)} to 30000 chars for embedding")
-        text = text[:30000]
+    # Use the tokenizer for the specific model.
+    # For text-embedding-ada-002, the encoding is 'cl100k_base'
+    encoding = tiktoken.get_encoding("cl100k_base")
+    MODEL_TOKEN_LIMIT = 8192
+
+    tokens = encoding.encode(text)
+    if len(tokens) > MODEL_TOKEN_LIMIT:
+        print(f"  Warning: Text truncated from {len(tokens)} to {MODEL_TOKEN_LIMIT} tokens for embedding")
+        tokens = tokens[:MODEL_TOKEN_LIMIT]
+        text = encoding.decode(tokens)
 
     response = openai_client.embeddings.create(
         model=EMBEDDING_MODEL,
