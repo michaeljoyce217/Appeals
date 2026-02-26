@@ -76,10 +76,25 @@ NOTE_EXTRACTION_TARGETS = """## Oxygenation Status (PRIORITY - extract ALL avail
 
 ## Clinical Presentation
 - Dyspnea severity and onset
-- Use of accessory muscles
 - Work of breathing assessments
 - Mental status changes related to respiratory failure
+
+## Physical Manifestations of Acute Respiratory Failure (extract ALL with timestamps)
+- Use of accessory muscles to breathe
+- Tachypnea (respirations >30)
 - Cyanosis
+- Unable to speak in full sentences
+- Blue lips / pursed lips
+- Blue nail bed
+- Clubbing
+- Tripod position
+- Agonal respirations
+- Cheyne-Stokes respirations
+- Air hunger
+- Kussmaul's respiration
+- Hyperventilation
+- Hypoventilation
+- Apneic breathing
 
 ## Treatment Response
 - Response to oxygen therapy
@@ -246,7 +261,20 @@ WRITER_SCORING_INSTRUCTIONS = """5. QUANTIFY ACUTE RESPIRATORY FAILURE using dia
 
    OXYGEN DELIVERY CONTEXT: When citing SpO2 readings, verify the oxygen delivery method. If the patient is on high-flow nasal cannula but FiO2 is set at 21% or less, this is essentially room air (~20% FiO2). Clarify whether the SpO2 was on room air or supplemental oxygen, as this affects the hypoxic criterion.
 
-   SIGNS AND SYMPTOMS: Include ALL documented signs and symptoms of respiratory distress in the clinical presentation: dyspnea, difficulty breathing, increased work of breathing, use of accessory muscles, tachypnea, cyanosis, altered mental status related to respiratory compromise."""
+   SIGNS AND SYMPTOMS: Include ALL documented signs and symptoms of respiratory distress in the clinical presentation: dyspnea, difficulty breathing, altered mental status related to respiratory compromise, and the following physical manifestations of acute respiratory failure when documented:
+   - Use of accessory muscles to breathe
+   - Tachypnea (respirations >30 as physical manifestation; distinct from the >20 diagnostic threshold)
+   - Cyanosis (including blue lips, blue nail beds)
+   - Unable to speak in full sentences
+   - Pursed lip breathing
+   - Clubbing
+   - Tripod position
+   - Agonal respirations
+   - Cheyne-Stokes respirations
+   - Air hunger
+   - Kussmaul's respiration
+   - Hyperventilation / hypoventilation
+   - Apneic breathing"""
 
 # =============================================================================
 # Assessment Labels
