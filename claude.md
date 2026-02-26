@@ -423,7 +423,7 @@ The following feedback items from SME review require external decisions or data 
 |---|------|---------|--------|
 | 1 | CMS bundle compliance — don't use with non-CMS payors | Need payor classification data | Deferred |
 | 2 | Critical care charges — verify CPT 99291 before citing | Need charge data access | Deferred |
-| 3 | ARF respiratory rate threshold — >20 (Propel/ACDIS) vs >30 (Mercy Q-tip) | Needs internal consensus | Blocked |
+| 3 | ARF respiratory rate threshold — resolved as >20 (per Propel/ACDIS) | Implemented in WRITER_SCORING_INSTRUCTIONS | Resolved 2026-02-26 |
 | 4 | ARF case pre-screening — only appeal cases matching WON patterns | Needs outcome data + screening logic | Deferred |
 
 ## Team
